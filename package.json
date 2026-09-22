@@ -10,7 +10,8 @@
     "typecheck": "pnpm -r --filter './packages/*' run typecheck",
     "test": "pnpm -r --filter './packages/*' run test",
     "verify": "pnpm run typecheck && pnpm run build && pnpm run test && node scripts/check-bundle.mjs packages/test-account",
-    "install:profile": "bash ./install.sh"
+    "install:profile": "bash ./install.sh",
+    "smoke:ui": "node scripts/smoke-ui.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

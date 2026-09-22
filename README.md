@@ -54,6 +54,9 @@ npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081
 
 1. 打开一个 Session，在右侧栏点「测试账号」（对话头部的快捷按钮，或右侧栏 `+` → 向导里的
    「测试账号」）。
+
+   > 头部按钮挂在对话头上，所以**刚新建、还没发过消息的空 Session**看不到它；发一条消息或打开
+   > 已有对话就会出现。右侧栏本身也是 Session 级的，没有 Session 时不存在。
 2. 「+ 添加」建账号：只需要名称 / ID / 站点 / 标签，**不填用户名密码**。
 3. 在浏览器里手动登录某个测试账号，回到面板点「保存当前登录态」。
 4. 换账号时点「使用账号」，插件把对应 `storageState` 灌回当前 Session 的浏览器。
@@ -217,7 +220,19 @@ pnpm run verify        # 以上全跑，并做 client bundle 结构检查
 | 集成 | `POST /api/test-account` 真实 HTTP + 鉴权：增删改查、持久化、全部错误码、`session-not-live` 守卫 | ✅ curl 走完整流程 |
 | 集成 | `@playwright/mcp` 带 `--caps=storage` 时工具数为 41 且包含两个 storage 工具；不带时 24 且没有 | ✅ 直接起 MCP server 列工具 |
 | 集成 | 真实 Chrome：`browser_storage_state` 把登录态写到工作区外的账号目录（含 `cookies` / `origins`），`browser_set_storage_state` 再读回；去掉 `--allow-unrestricted-file-access` 时同路径被 `File access denied … outside allowed roots` 拒绝 | ✅ 正是降级路径存在的理由 |
+| 集成 | 真实浏览器 UI：头部入口渲染 → 打开右侧栏面板 → 读到 Host 已有账号 → 表单新建账号并落盘 → 无登录态时「使用账号」禁用 → 删除 | ✅ `pnpm run smoke:ui <url>` 9/9 通过，无 page error |
 | 手工 | 图形浏览器里「登录 → 保存登录态 → 换账号 → 恢复」 | ⏳ 需要人手动登录，见下 |
+
+`scripts/smoke-ui.mjs` 需要一个已经跑起来的实例：
+
+```bash
+./install.sh test-account
+npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081   # 记下打印的带 token URL
+pnpm run smoke:ui "http://127.0.0.1:3081/?token=..."
+```
+
+它会用本机 Chrome（`CHROME_PATH` 可覆盖）真的开一个页面，建 Session、发一条消息让对话头挂载
+（首次运行会点掉「稍后配置」的 API Key 弹窗），然后断言面板的注册、读取、写入、删除全链路。
 
 端到端验证（需要能跑图形浏览器；`cordis.patch.yml` 默认 `headless: false`）：
 
