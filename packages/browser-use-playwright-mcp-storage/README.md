@@ -20,6 +20,15 @@ capabilities / 透传参数的口子，所以官方 provider 下这两个工具*
 本包复用官方同一个 session 生命周期（`@deepseek-ai/dsh-experimental-browser-use-runtime/mcp`
 的 `mountSessionMcp`），只改进程参数。
 
+## 安装
+
+不要单独装本包：它必须和 `@dsh-test-account/test-account` 一起进同一个 profile，且**一个部署只能挂一个
+browser provider**（见下文）。用仓库根的 `install.sh` 一次装好：
+
+```bash
+./install.sh test-account        # 默认 profile；详见根 README「零、AI 安装引导（Agent 执行清单）」
+```
+
 ## 参数拼装
 
 ```text

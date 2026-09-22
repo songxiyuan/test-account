@@ -11,6 +11,18 @@
 它不启动浏览器、不存密码、不做自动登录；浏览器操作全部转发给当前 Session 已经持有的
 Playwright MCP 工具。
 
+## 安装
+
+本包不是独立安装的：它是 `dsh.bundle.patch` 的载体，必须和 storage provider、两个官方 browser-use
+包一起装进同一个 DSH profile，否则面板、路由和浏览器工具都不完整。用仓库根的 `install.sh` 一次装好：
+
+```bash
+./install.sh test-account        # 默认 profile；详见根 README「零、AI 安装引导（Agent 执行清单）」
+```
+
+安装后 profile 的 `dsh.profile.bundles` 会自动包含 `@dsh-test-account/test-account`（来自本包的
+`cordis.patch.yml`），无需手工改 `cordis.yml`。
+
 ## 路由与端点
 
 路由 `POST /api/test-account`，请求体 `{ endpoint, payload }`，返回

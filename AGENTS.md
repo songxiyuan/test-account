@@ -88,6 +88,9 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
 
 - `./install.sh [profile]` 是唯一推荐安装入口；默认 profile 为 `test-account`，从 DSH 自带 `web`
   模板初始化。
+- 根 README 的「零、AI 安装引导（Agent 执行清单）」是给 AI Agent 的自包含安装规程（前置检查、
+  逐条命令、成功信号、安装后自检、故障→处理、硬性约束、机器可读摘要）。改动安装入口、包清单、
+  版本线或自检方式时，必须同步更新该节，保持命令可直接复制执行。
 - 插件通过 `dsh plugin --profile <p> add <本地路径>` 安装；`@dsh-test-account/test-account` 声明了
   `dsh.bundle.patch`，安装后会被自动加进该 profile 的 `dsh.profile.bundles`。
 - 不要写 `postinstall` 去改用户的 DSH profile。
