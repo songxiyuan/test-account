@@ -233,7 +233,7 @@ pnpm run verify        # 以上全跑，并做 client bundle 结构检查
 | 集成 | 真实 Chrome：`browser_storage_state` 把登录态写到工作区外的账号目录（含 `cookies` / `origins`），`browser_set_storage_state` 再读回；去掉 `--allow-unrestricted-file-access` 时同路径被 `File access denied … outside allowed roots` 拒绝 | ✅ 正是降级路径存在的理由 |
 | 集成 | **整条链路**：真实浏览器里打开面板 → 路由 `accounts/saveState` → DSH `ctx.tools.execute('mcp__playwright-mcp__browser_storage_state')` → Playwright MCP → 真实 Chrome → 账号目录落盘；再 `accounts/use` 恢复并更新当前账号 | ✅ `pnpm run smoke:ui <url> --home <DSH_HOME>` 17/17 通过，无 page error |
 | 集成 | 上面这套在三种装法下都跑过：`install.sh` 新建的 profile、已初始化过的 profile、以及不配 `executablePath`（靠自动探测本机 Chrome） | ✅ |
-| 手工 | 图形浏览器里「登录 → 保存登录态 → 换账号 → 恢复」 | ⏳ 需要人手动登录，见下 |
+| 手工 | 图形浏览器里「登录 → 保存登录态 → 换账号 → 恢复」；以及设计文档 §14 的风险项：两个 Session 同时各起一个浏览器、各自切账号互不干扰 | ⏳ 需要人手动登录；浏览器资源是 DSH provider 的职责，不该在本插件里绕过 |
 
 `scripts/smoke-ui.mjs` 需要一个已经跑起来的实例：
 
