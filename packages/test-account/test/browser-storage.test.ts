@@ -7,6 +7,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
   BrowserStorageBridge,
   BrowserStorageError,
+  browserInstallHint,
   isFileAccessDenied,
   storageToolName,
   type StorageBridgeHost,
@@ -104,6 +105,40 @@ test('tool names use the provider namespace', () => {
 test('the file fence is recognized from the upstream message', () => {
   assert.equal(isFileAccessDenied(new Error('File access denied: /x is outside allowed roots. Allowed roots: /y')), true)
   assert.equal(isFileAccessDenied(new Error('something else')), false)
+})
+
+test('a missing browser produces actionable guidance', () => {
+  const upstream =
+    'Error: Browser "chrome-for-testing" is not installed; expected executable at /x. Run `npx @playwright/mcp install-browser chrome-for-testing` to install'
+  const hint = browserInstallHint(upstream)
+  assert.match(hint, /install-browser chrome-for-testing/u)
+  assert.match(hint, /executablePath/u)
+  assert.equal(browserInstallHint('something unrelated'), '')
+})
+
+test('a missing browser failure reaches the caller with the hint attached', async () => {
+  await withDirs(async (workspace, store) => {
+    const host = {
+      tools: {
+        get: (): unknown => ({ name: 'x' }),
+        execute: async (): Promise<unknown> => ({
+          isError: true,
+          content: [{ type: 'text', text: 'Browser "chrome-for-testing" is not installed' }],
+          error: { name: 'ToolError', code: 'TOOL_ERROR' },
+        }),
+      },
+    } as unknown as StorageBridgeHost
+    const bridge = new BrowserStorageBridge(host, {
+      provider: 'playwright-mcp',
+      stateAccess: 'direct',
+      stagePrefix: '.stage-',
+      toolTimeoutMs: 5_000,
+    })
+    await assert.rejects(
+      bridge.save(fakeAgent(workspace), access(join(store, 'x.json')), new AbortController().signal),
+      /install-browser chrome-for-testing/u,
+    )
+  })
 })
 
 test('direct mode saves straight into the account store', async () => {

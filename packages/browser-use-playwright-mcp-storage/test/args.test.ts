@@ -1,11 +1,26 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildArgs, resolveConfig, validate, type ResolvedConfig } from '../src/args.ts'
+import {
+  buildArgs,
+  detectExecutablePath,
+  resolveConfig,
+  resolveExecutablePath,
+  SYSTEM_BROWSER_CANDIDATES,
+  validate,
+  type ResolvedConfig,
+} from '../src/args.ts'
 
 const CLI = '/opt/playwright-mcp/cli.js'
+const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
+/**
+ * Resolve a configuration with browser auto-detection off, so an argument-list
+ * assertion does not depend on which browsers the test machine happens to have.
+ * @param input - overrides on top of the detection-off baseline.
+ * @returns the resolved configuration.
+ */
 function resolved(input: Parameters<typeof resolveConfig>[0] = {}): ResolvedConfig {
-  return resolveConfig(input)
+  return resolveConfig({ autoExecutablePath: false, ...input })
 }
 
 test('launch defaults enable the storage capability', () => {
@@ -40,14 +55,43 @@ test('attach mode forwards the endpoint and drops launch-only switches', () => {
 })
 
 test('an executable path is forwarded only in launch mode', () => {
-  const args = buildArgs(resolved({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' }), CLI)
-  assert.deepEqual(args.slice(-4), ['--executable-path', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '--allow-unrestricted-file-access', '--caps=storage'])
+  const args = buildArgs(resolved({ executablePath: CHROME }), CLI)
+  const at = args.indexOf('--executable-path')
+  assert.ok(at > 0)
+  assert.equal(args[at + 1], CHROME)
+  const attached = buildArgs(resolved({ mode: 'attach', endpoint: 'http://127.0.0.1:9222' }), CLI, '/ignored')
+  assert.ok(!attached.includes('--executable-path'))
 })
 
 test('extra raw arguments are appended last', () => {
   const args = buildArgs(resolved({ extraArgs: ['--save-session'] }), CLI)
   assert.equal(args.at(-1), '--save-session')
   assert.equal(args.at(-2), '--caps=storage')
+})
+
+test('a supplied executable reaches the command line', () => {
+  const args = buildArgs(resolved(), CLI, '/usr/bin/google-chrome')
+  const at = args.indexOf('--executable-path')
+  assert.ok(at > 0)
+  assert.equal(args[at + 1], '/usr/bin/google-chrome')
+})
+
+test('system browser detection walks the platform candidates in order', () => {
+  const darwin = SYSTEM_BROWSER_CANDIDATES.darwin ?? []
+  assert.ok(darwin.length >= 2)
+  assert.equal(detectExecutablePath('darwin', (path) => path === darwin[0]), darwin[0])
+  assert.equal(detectExecutablePath('darwin', (path) => path === darwin[1]), darwin[1])
+  assert.equal(detectExecutablePath('darwin', () => false), undefined)
+  assert.equal(detectExecutablePath('plan9', () => true), undefined)
+  assert.ok((SYSTEM_BROWSER_CANDIDATES.linux ?? []).length > 0)
+  assert.ok((SYSTEM_BROWSER_CANDIDATES.win32 ?? []).length > 0)
+})
+
+test('auto-detection is on by default and yields to an explicit path', () => {
+  assert.equal(resolveConfig({}).autoExecutablePath, true)
+  assert.equal(resolveExecutablePath(resolved({ executablePath: '/opt/chrome' }), '/detected'), '/opt/chrome')
+  assert.equal(resolveExecutablePath(resolved(), '/detected'), '/detected')
+  assert.equal(resolveExecutablePath(resolved({ autoExecutablePath: false }), undefined), undefined)
 })
 
 test('attach without an endpoint is rejected', () => {

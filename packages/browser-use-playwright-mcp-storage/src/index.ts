@@ -18,13 +18,16 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { mountSessionMcp } from '@deepseek-ai/dsh-experimental-browser-use-runtime/mcp'
-import { BROWSER_PROVIDER_NAME, buildArgs, resolveConfig, type Config } from './args.ts'
+import { BROWSER_PROVIDER_NAME, buildArgs, resolveConfig, resolveExecutablePath, type Config } from './args.ts'
 
 export {
   BROWSER_PROVIDER_NAME,
   DEFAULT_CAPABILITIES,
+  SYSTEM_BROWSER_CANDIDATES,
   buildArgs,
+  detectExecutablePath,
   playwrightCliPath,
+  resolveExecutablePath,
   validate,
   type ResolvedConfig,
 } from './args.ts'
@@ -43,6 +46,14 @@ export const inject = ['browserUse', 'agents', 'tools', 'systemPrompt']
  */
 export function apply(ctx: Context, input: Config = {}): void {
   const config = resolveConfig(input)
+  const executable = resolveExecutablePath(config)
+  if (config.mode === 'launch' && executable === undefined) {
+    ctx.logger.warn(
+      'no system Chrome found; falling back to the Playwright-managed browser. ' +
+        'If it is missing, run `npx @playwright/mcp install-browser chrome-for-testing`, ' +
+        'or set `executablePath` on this provider.',
+    )
+  }
   // Blank any inherited Playwright MCP switches: the profile is the only source
   // of browser configuration, and the shipped provider scrubs them the same way.
   const env = Object.fromEntries(
@@ -54,7 +65,7 @@ export function apply(ctx: Context, input: Config = {}): void {
     name: BROWSER_PROVIDER_NAME,
     exclusive: config.mode === 'attach',
     command: process.execPath,
-    args: buildArgs(config),
+    args: buildArgs(config, undefined, executable),
     env,
     ...(config.toolCallTimeoutMs === undefined ? {} : { toolCallTimeoutMs: config.toolCallTimeoutMs }),
   })

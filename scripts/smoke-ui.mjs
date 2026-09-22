@@ -1,34 +1,45 @@
 #!/usr/bin/env node
 /**
- * Browser smoke test for the client half.
+ * Browser smoke test for the whole plugin.
  *
  * Boots a DSH instance with the test-account profile, opens the authenticated
  * Web URL in a real Chrome, creates a Session, and asserts that the panel
  * registers, reads the Host's account list, and round-trips one write through
  * `POST /api/test-account`.
  *
+ * With `--home <DSH_HOME>` it goes further and exercises the browser half end to
+ * end: it finds the Session the UI just created, then drives
+ * `accounts/saveState` and `accounts/use` through the plugin's own route, which
+ * makes DSH run `browser_storage_state` / `browser_set_storage_state` in that
+ * Session's scope and write a real Playwright storageState into the account
+ * directory. That needs a working browser (see the provider README).
+ *
  * The DSH shell only mounts the conversation header once a Session has a turn,
  * and running a turn needs a model credential, so the script sends one message
- * and ignores the resulting provider failure. Everything else it asserts is
+ * and ignores the resulting provider failure. Everything it asserts is
  * model-independent.
  *
  * Usage:
  *   node scripts/smoke-ui.mjs "http://127.0.0.1:3081/?token=..."
+ *   node scripts/smoke-ui.mjs "http://127.0.0.1:3081/?token=..." --home ~/.dsh
  *
  * The URL is the one `dsh --profile <name> web --port <port>` prints. The
  * script needs a Google Chrome install and the `playwright-core` that ships
  * inside this repository's `@playwright/mcp` dependency.
  */
 
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const url = process.argv[2]
 if (url === undefined) {
-  console.error('usage: node scripts/smoke-ui.mjs "<authenticated DSH web URL>"')
+  console.error('usage: node scripts/smoke-ui.mjs "<authenticated DSH web URL>" [--home <DSH_HOME>]')
   process.exit(2)
 }
+const homeIndex = process.argv.indexOf('--home')
+const dshHome = homeIndex < 0 ? undefined : process.argv[homeIndex + 1]
 
 const packageDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'packages', 'browser-use-playwright-mcp-storage')
 const require = createRequire(join(packageDir, 'package.json'))
@@ -37,6 +48,27 @@ const { chromium } = mcpRequire('playwright-core')
 
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const checks = []
+
+/**
+ * Find the Session the UI just created, by newest session directory.
+ *
+ * The directory name is the real SessionId, prefix included.
+ * @param home - the DSH home the instance was booted with.
+ * @returns the SessionId.
+ */
+function newestSessionId(home) {
+  const root = join(home, 'sessions')
+  const dirs = readdirSync(root).flatMap((workspace) =>
+    readdirSync(join(root, workspace)).map((entry) => ({
+      entry,
+      mtime: statSync(join(root, workspace, entry)).mtimeMs,
+    })),
+  )
+  dirs.sort((a, b) => b.mtime - a.mtime)
+  const newest = dirs[0]
+  if (newest === undefined) throw new Error(`no Session found under ${root}`)
+  return newest.entry
+}
 
 /**
  * Record and report one assertion.
@@ -131,6 +163,46 @@ try {
   await card.getByRole('button', { name: '确认删除' }).click()
   await page.waitForTimeout(2500)
   check('delete through the panel removes the account', !(await panel.innerText()).includes(id))
+
+  if (dshHome !== undefined) {
+    // The browser half: the same route the panel uses, from inside the page, so
+    // the Session's Agent stays live while DSH runs the MCP storage tools.
+    const sessionId = newestSessionId(dshHome)
+    check('found the live Session id', sessionId.startsWith('session-'), sessionId)
+    const statePath = join(dshHome, 'test-accounts', 'states', 'smoke-browser.json')
+    rmSync(statePath, { force: true })
+    const call = (endpoint, payload) =>
+      page.evaluate(
+        async ([endpoint, payload]) => {
+          const response = await fetch('/api/test-account', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ endpoint, payload }),
+          })
+          return response.json()
+        },
+        [endpoint, payload],
+      )
+
+    await call('accounts/delete', { id: 'smoke-browser' })
+    const created = await call('accounts/create', { input: { id: 'smoke-browser', name: '浏览器冒烟账号' } })
+    check('account created for the browser round-trip', created.ok === true && created.value.hasState === false)
+
+    const saved = await call('accounts/saveState', { sessionId, id: 'smoke-browser' })
+    check('saveState succeeded through the DSH tool runtime', saved.ok === true, saved.ok === true ? '' : JSON.stringify(saved))
+    check('Playwright MCP wrote a storageState into the account directory', existsSync(statePath))
+    if (existsSync(statePath)) {
+      const parsed = JSON.parse(readFileSync(statePath, 'utf8'))
+      check('the state file is a real storageState document', Array.isArray(parsed.cookies) && Array.isArray(parsed.origins), Object.keys(parsed).join(','))
+    }
+
+    const used = await call('accounts/use', { sessionId, id: 'smoke-browser' })
+    check('useAccount restored it through the DSH tool runtime', used.ok === true && used.value.currentAccountId === 'smoke-browser')
+    const current = await call('accounts/current', { sessionId })
+    check('the Session reports that account afterwards', current.ok === true && current.value.currentAccountId === 'smoke-browser')
+    await call('accounts/delete', { id: 'smoke-browser' })
+    check('cleanup removed the account and its state', !existsSync(statePath))
+  }
 
   check('no page errors', errors.length === 0)
 } finally {

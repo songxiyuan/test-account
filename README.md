@@ -50,6 +50,11 @@ DSH_VERSION=0.1.7-alpha.1 ./install.sh ta
 npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081
 ```
 
+> **浏览器本体**：provider 默认自动探测本机 Chrome / Chromium / Edge 并复用，所以装了 Chrome 的
+> 机器开箱即用。如果一台机器两者都没有，第一次保存登录态会提示两条出路：跑
+> `npx @playwright/mcp install-browser chrome-for-testing`，或在 profile 里显式配
+> `executablePath`。详见 [`packages/browser-use-playwright-mcp-storage/README.md`](packages/browser-use-playwright-mcp-storage/README.md#浏览器本体)。
+
 ## 二、用起来
 
 1. 打开一个 Session，在右侧栏点「测试账号」（对话头部的快捷按钮，或右侧栏 `+` → 向导里的
@@ -149,7 +154,8 @@ packages/
 | `provider.caps` | 传给 `@playwright/mcp` 的能力，默认 `['storage']` |
 | `provider.allowUnrestrictedFileAccess` | 允许 storage 工具读写 Session 工作区之外的路径（账号目录需要），默认开 |
 | `provider.headless` | 是否无窗口；保存登录态必须人工登录，所以默认 `false` |
-| `provider.executablePath` | 复用本机 Chrome，避免再下一份 Chromium |
+| `provider.executablePath` | 显式指定浏览器（复用本机 Chrome），优先于自动探测 |
+| `provider.autoExecutablePath` | 默认 `true`：按平台探测本机已装的 Chrome / Chromium / Edge |
 
 ## 六、几个来自真实代码的结论（与设计文档的差异）
 
@@ -215,9 +221,9 @@ pnpm run verify        # 以上全跑，并做 client bundle 结构检查
 | 层级 | 内容 | 结论 |
 | --- | --- | --- |
 | 单元 | `account-store`：读写、id 校验、去重、清空可选字段、路径越界、脏 JSON | ✅ 12 项 |
-| 单元 | provider 参数拼装与 launch/attach 校验 | ✅ 12 项 |
+| 单元 | provider 参数拼装、launch/attach 校验、系统浏览器探测与 `--executable-path` | ✅ 15 项 |
 | 单元 | `AccountService`：保存/恢复、`session-not-live`、`state-missing`、删除清理记账、**两个 Session 各持一个账号互不覆盖**（§11.5） | ✅ 8 项（假 bridge + 假 Agent 注册表） |
-| 单元 | 浏览器桥：direct、工作区被拒后自动降级 staged、工具缺失/失败错误码 | ✅ 9 项，用模拟的工作区文件栅栏 |
+| 单元 | 浏览器桥：direct、工作区被拒后自动降级 staged、工具缺失/失败错误码、缺浏览器的提示 | ✅ 11 项，用模拟的工作区文件栅栏 |
 | 单元 | 插件接线：路由注册、三个 Agent 工具注册、`agentTools: false` 不注册、路由增删查与错误码 | ✅ 5 项（假 Cordis ctx） |
 | 构建 | `lib/client.js` 真的是 `window.__ModuleLoader__.load` 懒加载包 | ✅ `scripts/check-bundle.mjs` |
 | 集成 | `./install.sh <profile>` 在全新 `DSH_HOME` 上从零跑通：构建 → 初始化 profile → 装 4 个包 → 自动加入 `dsh.profile.bundles` → 能启动 | ✅ 脚本本身已实测 |
@@ -225,7 +231,8 @@ pnpm run verify        # 以上全跑，并做 client bundle 结构检查
 | 集成 | `POST /api/test-account` 真实 HTTP + 鉴权：增删改查、持久化、全部错误码、`session-not-live` 守卫 | ✅ curl 走完整流程 |
 | 集成 | `@playwright/mcp` 带 `--caps=storage` 时工具数为 41 且包含两个 storage 工具；不带时 24 且没有 | ✅ 直接起 MCP server 列工具 |
 | 集成 | 真实 Chrome：`browser_storage_state` 把登录态写到工作区外的账号目录（含 `cookies` / `origins`），`browser_set_storage_state` 再读回；去掉 `--allow-unrestricted-file-access` 时同路径被 `File access denied … outside allowed roots` 拒绝 | ✅ 正是降级路径存在的理由 |
-| 集成 | 真实浏览器 UI：头部入口渲染 → 打开右侧栏面板 → 读到 Host 已有账号 → 表单新建账号并落盘 → 无登录态时「使用账号」禁用 → 删除 | ✅ `pnpm run smoke:ui <url>` 9/9 通过，无 page error；`install.sh` 新建的 profile 与已初始化过的 profile 各跑一遍 |
+| 集成 | **整条链路**：真实浏览器里打开面板 → 路由 `accounts/saveState` → DSH `ctx.tools.execute('mcp__playwright-mcp__browser_storage_state')` → Playwright MCP → 真实 Chrome → 账号目录落盘；再 `accounts/use` 恢复并更新当前账号 | ✅ `pnpm run smoke:ui <url> --home <DSH_HOME>` 17/17 通过，无 page error |
+| 集成 | 上面这套在三种装法下都跑过：`install.sh` 新建的 profile、已初始化过的 profile、以及不配 `executablePath`（靠自动探测本机 Chrome） | ✅ |
 | 手工 | 图形浏览器里「登录 → 保存登录态 → 换账号 → 恢复」 | ⏳ 需要人手动登录，见下 |
 
 `scripts/smoke-ui.mjs` 需要一个已经跑起来的实例：
@@ -233,13 +240,21 @@ pnpm run verify        # 以上全跑，并做 client bundle 结构检查
 ```bash
 ./install.sh test-account
 npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081   # 记下打印的带 token URL
+
+# 只验面板（不需要浏览器本体）
 pnpm run smoke:ui "http://127.0.0.1:3081/?token=..."
+
+# 连浏览器登录态一起验（会真的启动一个 Chrome、跑 MCP 的 storage 工具）
+pnpm run smoke:ui "http://127.0.0.1:3081/?token=..." -- --home ~/.dsh
 ```
 
 它会用本机 Chrome（`CHROME_PATH` 可覆盖）真的开一个页面，建 Session、发一条消息让对话头挂载
-（首次运行会点掉「稍后配置」的 API Key 弹窗），然后断言面板的注册、读取、写入、删除全链路。
+（首次运行会点掉「稍后配置」的 API Key 弹窗），然后断言面板的注册、读取、写入、删除全链路；
+带 `--home` 时再补上「saveState → DSH 工具运行时 → Playwright MCP → 真实 Chrome → 落盘 → use 恢复」
+这一段。它用的是无窗口 Chrome，但**被测 provider 自己会按 profile 配置起浏览器**，所以做这一段时
+建议先按上面的 `--patch` 例子把 provider 改成 `headless: true`，否则屏幕上会弹出一个 Chrome。
 
-端到端验证（需要能跑图形浏览器；`cordis.patch.yml` 默认 `headless: false`）：
+端到端验证（手工，需要能跑图形浏览器；`cordis.patch.yml` 默认 `headless: false`）：
 
 ```bash
 ./install.sh test-account

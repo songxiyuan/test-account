@@ -5,6 +5,7 @@
  * @module
  */
 
+import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Schema from '@deepseek-ai/schemastery'
@@ -14,6 +15,52 @@ export const BROWSER_PROVIDER_NAME = 'playwright-mcp'
 
 /** Capabilities enabled in addition to the always-on `core*` tool families. */
 export const DEFAULT_CAPABILITIES = ['storage'] as const
+
+/**
+ * Well-known system browser locations, per platform.
+ *
+ * The pinned Playwright MCP server otherwise insists on its own
+ * `chrome-for-testing` download, which no fresh machine has. Reusing an already
+ * installed Chrome keeps a check-out working without a ~150 MB download and is
+ * what the design recommends for internal development machines.
+ */
+export const SYSTEM_BROWSER_CANDIDATES: Readonly<Record<string, readonly string[]>> = {
+  darwin: [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+  ],
+  win32: [
+    join(process.env['PROGRAMFILES'] ?? 'C:\\Program Files', 'Google/Chrome/Application/chrome.exe'),
+    join(process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)', 'Google/Chrome/Application/chrome.exe'),
+    join(process.env['LOCALAPPDATA'] ?? '', 'Google/Chrome/Application/chrome.exe'),
+    join(process.env['PROGRAMFILES'] ?? 'C:\\Program Files', 'Microsoft/Edge/Application/msedge.exe'),
+  ],
+  linux: [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/microsoft-edge',
+    '/snap/bin/chromium',
+  ],
+}
+
+/**
+ * Find an installed system browser.
+ *
+ * Purely a lookup: no network, no install, no side effect.
+ * @param platform - target platform; defaults to the running one.
+ * @param exists - file-existence predicate; defaults to `fs.existsSync`.
+ * @returns the first candidate that exists, or `undefined`.
+ */
+export function detectExecutablePath(
+  platform: string = process.platform,
+  exists: (path: string) => boolean = existsSync,
+): string | undefined {
+  return (SYSTEM_BROWSER_CANDIDATES[platform] ?? []).find((candidate) => exists(candidate))
+}
 
 /** Provider configuration as declared in a profile patch row. */
 export interface Config {
@@ -36,6 +83,12 @@ export interface Config {
   allowUnrestrictedFileAccess?: boolean
   /** Extra raw arguments appended to the pinned server invocation. */
   extraArgs?: string[]
+  /**
+   * Probe well-known system browser locations when {@link Config.executablePath}
+   * is unset; defaults to true so a check-out works without the Playwright
+   * `chrome-for-testing` download.
+   */
+  autoExecutablePath?: boolean
 }
 
 /** Loader defaults and validation for the provider configuration. */
@@ -48,13 +101,17 @@ export const Config = Schema.object({
   caps: Schema.array(Schema.string()).default([...DEFAULT_CAPABILITIES]),
   allowUnrestrictedFileAccess: Schema.boolean().default(true),
   extraArgs: Schema.array(Schema.string()).default([]),
+  autoExecutablePath: Schema.boolean().default(true),
 })
 
 /** Resolved configuration after schema defaults. */
 export type ResolvedConfig = Required<
-  Pick<Config, 'mode' | 'headless' | 'caps' | 'allowUnrestrictedFileAccess' | 'extraArgs'>
+  Pick<Config, 'mode' | 'headless' | 'caps' | 'allowUnrestrictedFileAccess' | 'extraArgs' | 'autoExecutablePath'>
 > &
-  Omit<Config, 'mode' | 'headless' | 'caps' | 'allowUnrestrictedFileAccess' | 'extraArgs'>
+  Omit<
+    Config,
+    'mode' | 'headless' | 'caps' | 'allowUnrestrictedFileAccess' | 'extraArgs' | 'autoExecutablePath'
+  >
 
 /**
  * Reject a configuration that cannot start a browser before any resource is reserved.
@@ -93,18 +150,36 @@ export function playwrightCliPath(): string {
 }
 
 /**
+ * Decide which browser binary the launched server should use.
+ * @param config - schema-resolved provider configuration.
+ * @param detected - an already-probed system browser; defaults to a fresh probe.
+ * @returns the explicit path, the detected one, or `undefined` for upstream discovery.
+ */
+export function resolveExecutablePath(
+  config: ResolvedConfig,
+  detected: string | undefined = config.autoExecutablePath ? detectExecutablePath() : undefined,
+): string | undefined {
+  return config.executablePath ?? detected
+}
+
+/**
  * Compose the pinned server invocation.
  * @param config - schema-resolved provider configuration.
  * @param cli - absolute path of the `@playwright/mcp` CLI; defaults to the pinned one.
+ * @param executable - browser binary to pass; defaults to {@link resolveExecutablePath}.
  * @returns the CLI path plus the arguments handed to the MCP client.
  */
-export function buildArgs(config: ResolvedConfig, cli: string = playwrightCliPath()): string[] {
+export function buildArgs(
+  config: ResolvedConfig,
+  cli: string = playwrightCliPath(),
+  executable: string | undefined = resolveExecutablePath(config),
+): string[] {
   const args = [cli, '--browser', 'chromium']
   if (config.mode === 'attach') args.push('--cdp-endpoint', config.endpoint as string)
   else {
     args.push('--isolated')
     if (config.headless) args.push('--headless')
-    if (config.executablePath !== undefined) args.push('--executable-path', config.executablePath)
+    if (executable !== undefined) args.push('--executable-path', executable)
     if (config.allowUnrestrictedFileAccess) args.push('--allow-unrestricted-file-access')
   }
   if (config.caps.length > 0) args.push(`--caps=${config.caps.join(',')}`)

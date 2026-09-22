@@ -49,6 +49,9 @@ doc/dsh-test-account-plugin-design.md          # 原始设计方案（只读参�
   `dsh-client-ui-slots` / `dsh-client-ui-primitives` / `dsh-client-ui-dockkit`），其余必须打包进去。
 - `browser_storage_state` / `browser_set_storage_state` 需要 `--caps=storage`；官方 provider 没有
   透传口子，这就是 `packages/browser-use-playwright-mcp-storage` 存在的唯一原因。
+- 浏览器本体：`@playwright/mcp` 默认要它自己那份 `chrome-for-testing`，全新机器没有。provider 的
+  `autoExecutablePath`（默认开）按平台探测本机 Chrome/Chromium/Edge 并传 `--executable-path`，
+  探测不到才回退。改这块时要同时改 `SYSTEM_BROWSER_CANDIDATES` 与 README 的探测顺序表。
 - Host→Client 通信用 `ctx.connection.fetch.register({ path: '/api/test-account', methods: ['POST'], … })`
   + 客户端同源 `fetch`。**不要**用 `ctx.connection.rpc.handle`：这版里它内部依赖
   `owner.webServer`，而 Cordis context tracing 会把 owner 解析回 connection 服务自己的 scope，
@@ -77,6 +80,9 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
 - 测试用 Node 内置 `node --test` + 原生 TS type stripping，不要引入 jest/vitest。
 - `lib/` 是构建产物，已在 `.gitignore` 中，不要提交。
 - 修改账号存储或浏览器桥后，必须补/改 `packages/test-account/test/*.test.ts`。
+- 改动跨层链路（路由 / 工具执行 / provider 参数）后，除了单测还应跑一次真机冒烟：
+  起一个 profile，然后 `node scripts/smoke-ui.mjs "<带 token URL>" --home <DSH_HOME>`，
+  它覆盖「面板 → 路由 → ctx.tools.execute → MCP → 真 Chrome → 落盘 → 恢复」整条链路。
 
 ## 安装约定
 

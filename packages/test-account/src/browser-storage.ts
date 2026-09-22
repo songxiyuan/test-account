@@ -104,6 +104,25 @@ export function isFileAccessDenied(error: unknown): boolean {
 }
 
 /**
+ * Build an actionable suffix for a missing-browser failure.
+ *
+ * The pinned Playwright MCP server defaults to its own `chrome-for-testing`
+ * download, which a fresh machine does not have; without this hint the user sees
+ * an upstream installer line with no context about the DSH side.
+ * @param detail - the tool's failure text.
+ * @returns a guidance suffix, or an empty string when unrelated.
+ */
+export function browserInstallHint(detail: string): string {
+  if (!/is not installed|install-browser|Executable doesn't exist|Failed to launch/iu.test(detail)) return ''
+  return (
+    '\n提示：浏览器本体没找到。任选其一：' +
+    '（1）运行 `npx @playwright/mcp install-browser chrome-for-testing` 安装 Playwright 自带 Chromium；' +
+    '（2）在 profile 里给 provider 配 `executablePath` 复用本机 Chrome（例如 macOS：' +
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome）。provider 也会自动探测常见安装路径。'
+  )
+}
+
+/**
  * Drive the Session's Playwright MCP storage tools.
  *
  * A bridge is stateless; it reads the provider namespace and access mode from
@@ -224,7 +243,7 @@ export class BrowserStorageBridge {
     }
     if (result.isError) {
       const detail = contentToText(result.content) || result.error.message
-      throw new BrowserStorageError('browser-tool-failed', `${name} 执行失败：${detail}`)
+      throw new BrowserStorageError('browser-tool-failed', `${name} 执行失败：${detail}${browserInstallHint(detail)}`)
     }
   }
 

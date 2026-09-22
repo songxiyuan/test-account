@@ -39,7 +39,8 @@ capabilities / 透传参数的口子，所以官方 provider 下这两个工具*
 interface Config {
   mode?: 'launch' | 'attach'   // 默认 'launch'
   headless?: boolean           // 默认 true；保存登录态建议 false
-  executablePath?: string      // 复用本机 Chrome
+  executablePath?: string      // 显式指定浏览器，优先于自动探测
+  autoExecutablePath?: boolean // 默认 true：探测本机已装的 Chrome/Chromium/Edge
   endpoint?: string            // attach 模式必填
   toolCallTimeoutMs?: number
   caps?: string[]              // 默认 ['storage']
@@ -50,6 +51,29 @@ interface Config {
 
 `attach` 不能带 `endpoint` 以外的 launch 参数，`launch` 不能带 `endpoint`；不合法组合在占用任何浏览器
 资源之前就会抛错。这些规则有单元测试。
+
+## 浏览器本体
+
+钉住的 `@playwright/mcp@0.0.80` 默认要 `chrome-for-testing`（Playwright 自己那份 Chromium），
+全新机器上没有，第一次调用 storage 工具会直接失败：
+
+```text
+Browser "chrome-for-testing" is not installed; ...
+Run `npx @playwright/mcp install-browser chrome-for-testing` to install
+```
+
+`test-account` 会在这条错误后面追加一段中文提示，告诉用户可以走哪两条路。provider 自己则默认
+`autoExecutablePath: true`：按平台探测常见安装位置，命中就传 `--executable-path`，避免为了保存一个
+登录态再下 100+ MB 的 Chromium。
+
+| 平台 | 探测顺序 |
+| --- | --- |
+| macOS | `/Applications/Google Chrome.app/…` → Chromium → Microsoft Edge → Brave |
+| Windows | `%PROGRAMFILES%` / `%PROGRAMFILES(X86)%` / `%LOCALAPPDATA%` 下的 Chrome，然后 Edge |
+| Linux | `/usr/bin/google-chrome{,-stable}` → `/usr/bin/chromium{,-browser}` → microsoft-edge → `/snap/bin/chromium` |
+
+探测不到（例如干净的 CI）就回退到 Playwright 自带浏览器，并打一条 warn 提示两条出路。想强制用自带
+Chromium：`autoExecutablePath: false` + `npx @playwright/mcp install-browser chrome-for-testing`。
 
 ## 一个部署只能挂一个 browser provider
 
