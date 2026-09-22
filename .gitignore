@@ -1,1 +1,11 @@
 .DS_Store
+node_modules/
+lib/
+*.tsbuildinfo
+
+# Staged login-state copies, used when the browser provider cannot reach the
+# account directory directly (the plugin deletes them right after each call).
+.dsh-test-account-storage-*.json
+
+# Playwright MCP page snapshots, written wherever the MCP server runs.
+.playwright-mcp/

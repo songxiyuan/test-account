@@ -1,0 +1,45 @@
+{
+  "name": "@dsh-test-account/browser-use-playwright-mcp-storage",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright MCP browser provider that enables the upstream storage capability (--caps=storage) so login state can be saved and restored.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/index.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@playwright/mcp": "0.0.80"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.3",
+    "@deepseek-ai/dsh-agent": "^0.1.7-alpha.1",
+    "@deepseek-ai/dsh-browser-use": "^0.1.7-alpha.1",
+    "@deepseek-ai/dsh-experimental-browser-use-runtime": "^0.1.7-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.7-alpha.1",
+    "@deepseek-ai/dsh-tools": "^0.1.7-alpha.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.3",
+    "@deepseek-ai/dsh-agent": "0.1.7-alpha.1",
+    "@deepseek-ai/dsh-browser-use": "0.1.7-alpha.1",
+    "@deepseek-ai/dsh-experimental-browser-use-runtime": "0.1.7-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": "0.1.7-alpha.1",
+    "@deepseek-ai/dsh-tools": "0.1.7-alpha.1",
+    "@deepseek-ai/schemastery": "^3.18.3"
+  }
+}

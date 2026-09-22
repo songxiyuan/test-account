@@ -1,0 +1,20 @@
+{
+  "name": "dsh-test-account-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "DSH 测试账号登录态管理插件（Account Metadata Registry + Playwright storageState UI）",
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/*' run build",
+    "typecheck": "pnpm -r --filter './packages/*' run typecheck",
+    "test": "pnpm -r --filter './packages/*' run test",
+    "verify": "pnpm run typecheck && pnpm run build && pnpm run test && node scripts/check-bundle.mjs packages/test-account",
+    "install:profile": "bash ./install.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "esbuild": "^0.25.10",
+    "typescript": "^5.9.2"
+  }
+}

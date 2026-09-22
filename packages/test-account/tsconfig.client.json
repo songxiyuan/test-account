@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["react"],
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "jsx": "react-jsx",
+    "rootDir": "client",
+    "noEmit": true,
+    "declaration": false
+  },
+  "include": ["client/**/*.ts", "client/**/*.tsx"]
+}
