@@ -2,10 +2,14 @@
     - id: test-account-browser-use
       name: '@deepseek-ai/dsh-browser-use'
 
+    # Replaces the shipped Playwright MCP provider: same session lifecycle, plus
+    # --caps=storage so browser_storage_state / browser_set_storage_state exist.
+    # A deployment may mount only one browser-use provider at a time.
     - id: test-account-playwright-mcp
       name: '@dsh-test-account/browser-use-playwright-mcp-storage'
       config:
         mode: launch
+        # Saving a login state needs a human to log in, so the window stays visible.
         headless: false
         allowUnrestrictedFileAccess: true
 
@@ -14,3 +18,5 @@
       config:
         mcpProvider: playwright-mcp
         stateAccess: direct
+        # account_list / account_use / account_current; set false to hide them.
+        agentTools: true

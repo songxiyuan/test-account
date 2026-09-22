@@ -40,8 +40,27 @@ interface Config {
   stateAccess?: 'direct' | 'staged'  // 默认 'direct'
   stagePrefix?: string          // 默认 '.dsh-test-account-storage-'
   toolTimeoutMs?: number        // 默认 120000
+  agentTools?: boolean          // 默认 true：向 Agent 暴露下面三个工具
 }
 ```
+
+## Agent 工具（设计文档 Phase 5）
+
+`agentTools` 打开时，插件会注册三个模型可见的工具。它们和面板走同一个 `AccountService`，
+所以校验、错误码、Session 记账完全一致；工具操作的是**调用方 Session 自己的浏览器**
+（`exec.agent.id`），不需要也不接受 `sessionId` 参数。
+
+| 工具 | 参数 | 作用 |
+| --- | --- | --- |
+| `account_list` | — | 列出账号（id / 名称 / 站点 / 标签 / 登录态是否已保存）与本 Session 当前账号。只读 |
+| `account_use` | `id` | 把该账号的 `storageState` 恢复到本 Session 的浏览器，并把本 Session 的当前账号标为它 |
+| `account_current` | — | 查询本 Session 当前使用哪个账号 |
+
+这样「当前 Session 正在用哪个账号」对人和对 Agent 是同一份事实，Agent 也能按指定身份继续
+Browser Use / E2E / 排障，而不是要人在对话里额外说明。
+
+安全性：`account_use` 只恢复已经由人手动登录并保存过的 `storageState`，插件本身既不接收也不
+存储任何凭据；工具描述也明确要求调用后重新导航确认身份，不假设当前页面已刷新。
 
 ## 日志
 
@@ -54,5 +73,7 @@ pnpm --filter @dsh-test-account/test-account test
 ```
 
 `test/account-store.test.ts` 覆盖文件读写、id 校验、去重、清空可选字段、路径越界、脏 JSON；
+`test/accounts.test.ts` 用假的 browser bridge / Agent 注册表覆盖保存、恢复、错误码、
+删除时清理 Session 记账，以及**两个 Session 各持一个账号互不覆盖**（设计文档 §11.5）；
 `test/browser-storage.test.ts` 用一个模拟工作区文件栅栏的假 tool runtime，覆盖 `direct`、工作区被拒后
 自动降级到 `staged`、`staged` 直连、工具缺失与工具失败的错误码。

@@ -5,6 +5,10 @@
  * the per-account storageState files, remembers which account each Session is
  * using, and drives the current Session's Playwright MCP storage tools on
  * request. It starts no browser and stores no credentials.
+ *
+ * The operations themselves live in {@link AccountService}; this module only
+ * resolves configuration, builds the collaborators, and publishes the two faces
+ * (the `/api/test-account` route and the optional Agent tools).
  * @module @dsh-test-account/test-account
  */
 
@@ -12,27 +16,25 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
-import type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-client-connection'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { AccountStore, AccountStoreError } from './account-store.ts'
-import { BrowserStorageBridge, BrowserStorageError, type StorageFileAccess } from './browser-storage.ts'
+import { AccountService } from './accounts.ts'
+import { registerAgentTools } from './agent-tools.ts'
+import { BrowserStorageBridge, BrowserStorageError } from './browser-storage.ts'
 import {
   Endpoint,
   TEST_ACCOUNT_ROUTE,
   type AccountInput,
   type AccountPatch,
-  type AccountsSnapshot,
-  type AccountView,
   type RemoteResult,
-  type TestAccount,
 } from './types.ts'
 
 /** Cordis identity for the account plugin. */
 export const name = 'test-account'
 
 /**
- * Services required before the Remote route can be served.
+ * Services required before either face can be published.
  *
  * `webServer` is load-bearing: the route rides the Connection `/api` prefix that
  * only exists while a Web server does, and the plugin must wait for that.
@@ -51,6 +53,8 @@ export interface Config {
   stagePrefix?: string
   /** Upper bound on one browser storage tool call, in milliseconds. */
   toolTimeoutMs?: number
+  /** Whether to publish `account_list` / `account_use` / `account_current` to Agents. */
+  agentTools?: boolean
 }
 
 /** Loader defaults and validation for the account plugin configuration. */
@@ -60,15 +64,17 @@ export const Config = Schema.object({
   stateAccess: Schema.union([Schema.const('direct'), Schema.const('staged')]),
   stagePrefix: Schema.string(),
   toolTimeoutMs: Schema.number().min(1),
+  agentTools: Schema.boolean(),
 })
 
 /** Configuration with this plugin's defaults applied. */
-interface ResolvedConfig {
+export interface ResolvedConfig {
   root: string
   mcpProvider: string
   stateAccess: 'direct' | 'staged'
   stagePrefix: string
   toolTimeoutMs: number
+  agentTools: boolean
 }
 
 /**
@@ -92,6 +98,7 @@ export function resolveConfig(input: Config = {}): ResolvedConfig {
     stateAccess: input.stateAccess ?? 'direct',
     stagePrefix: input.stagePrefix ?? '.dsh-test-account-storage-',
     toolTimeoutMs: input.toolTimeoutMs ?? 120_000,
+    agentTools: input.agentTools ?? true,
   }
 }
 
@@ -149,91 +156,37 @@ function requireField(payload: Record<string, unknown>, field: string): string {
 }
 
 /**
+ * Read an optional string-list field.
+ * @param value - raw field value.
+ * @returns the strings, or `undefined` when the field is absent.
+ */
+function optionalTags(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((tag): tag is string => typeof tag === 'string') : undefined
+}
+
+/**
  * Host body of the account plugin.
  * @param ctx - plugin context supplying Connection, tools, and Agents.
  * @param input - profile configuration.
  */
 export function apply(ctx: Context, input: Config = {}): void {
   const config = resolveConfig(input)
-  const store = new AccountStore(config.root)
-  const bridge = new BrowserStorageBridge(ctx, {
-    provider: config.mcpProvider,
-    stateAccess: config.stateAccess,
-    stagePrefix: config.stagePrefix,
-    toolTimeoutMs: config.toolTimeoutMs,
-  })
   const log = ctx.logger('test-account')
-  /** Session id to account id, for the current process lifetime only. */
-  const currentAccounts = new Map<string, string>()
-  const agents = ctx.agents as AgentRegistry
-
-  /**
-   * Resolve the live Agent for one Session.
-   * @param sessionId - Session id from the Remote payload.
-   * @returns the live Agent.
-   */
-  function requireAgent(sessionId: string): Agent {
-    const agent = agents.get(sessionId as SessionId)
-    if (agent === undefined) {
-      throw new BrowserStorageError('session-not-live', `Session ${sessionId} 当前不活跃，无法操作浏览器登录态`)
-    }
-    return agent
-  }
-
-  /**
-   * Project one stored account onto the UI shape.
-   * @param account - stored record.
-   * @returns the account plus its measured state facts.
-   */
-  async function view(account: TestAccount): Promise<AccountView> {
-    const info = await store.stateInfo(account)
-    const projected: AccountView = { ...account, hasState: info.exists }
-    if (info.bytes !== undefined) projected.stateBytes = info.bytes
-    const updatedAt = info.updatedAt ?? account.updatedAt
-    if (updatedAt !== undefined) projected.stateUpdatedAt = updatedAt
-    return projected
-  }
-
-  /**
-   * Build the panel snapshot for one Session.
-   * @param sessionId - Session whose current account to report, when known.
-   * @returns the snapshot.
-   */
-  async function snapshot(sessionId: string | undefined): Promise<AccountsSnapshot> {
-    const accounts = await Promise.all((await store.list()).map(view))
-    const result: AccountsSnapshot = { root: store.root, accounts }
-    const current = sessionId === undefined ? undefined : currentAccounts.get(sessionId)
-    if (current !== undefined) result.currentAccountId = current
-    return result
-  }
-
-  /**
-   * Wrap one account's storageState file for the browser bridge.
-   * @param account - account whose file is read or written.
-   * @returns the file access the bridge needs.
-   */
-  function accessFor(account: TestAccount): StorageFileAccess {
-    return {
-      path: store.statePath(account),
-      read: () => store.readState(account),
-      write: (contents) => store.writeState(account, contents),
-    }
-  }
-
-  /**
-   * Require one stored account by id.
-   * @param id - account id.
-   * @returns the stored record.
-   */
-  async function requireAccount(id: string): Promise<TestAccount> {
-    const account = await store.get(id)
-    if (account === undefined) throw new AccountStoreError('unknown-account', `账号 “${id}” 不存在`)
-    return account
-  }
+  const service = new AccountService({
+    store: new AccountStore(config.root),
+    bridge: new BrowserStorageBridge(ctx, {
+      provider: config.mcpProvider,
+      stateAccess: config.stateAccess,
+      stagePrefix: config.stagePrefix,
+      toolTimeoutMs: config.toolTimeoutMs,
+    }),
+    agents: ctx.agents,
+    log,
+  })
 
   /**
    * Dispatch one Remote endpoint.
-   * @param endpoint - channel-relative endpoint name.
+   * @param endpoint - route-relative endpoint name.
    * @param payload - decoded payload.
    * @param signal - caller cancellation.
    * @returns the endpoint result.
@@ -242,68 +195,37 @@ export function apply(ctx: Context, input: Config = {}): void {
     try {
       const fields = asObject(payload)
       switch (endpoint) {
-        case Endpoint.list: {
-          const sessionId = typeof fields.sessionId === 'string' ? fields.sessionId : undefined
-          return ok(await snapshot(sessionId))
-        }
-        case Endpoint.current: {
-          const sessionId = requireField(fields, 'sessionId')
-          const accountId = currentAccounts.get(sessionId)
-          return ok(accountId === undefined ? {} : { currentAccountId: accountId })
-        }
+        case Endpoint.list:
+          return ok(await service.list(typeof fields.sessionId === 'string' ? fields.sessionId : undefined))
+        case Endpoint.current:
+          return ok(service.current(requireField(fields, 'sessionId')))
         case Endpoint.create: {
           const raw = asObject(fields.input)
-          const createInput: AccountInput = {
-            id: requireField(raw, 'id'),
-            name: requireField(raw, 'name'),
-          }
+          const createInput: AccountInput = { id: requireField(raw, 'id'), name: requireField(raw, 'name') }
           if (typeof raw.site === 'string') createInput.site = raw.site
-          if (Array.isArray(raw.tags)) createInput.tags = raw.tags.filter((tag): tag is string => typeof tag === 'string')
-          const account = await store.create(createInput)
-          log.info('created account %s', account.id)
-          return ok(await view(account))
+          const tags = optionalTags(raw.tags)
+          if (tags !== undefined) createInput.tags = tags
+          return ok(await service.create(createInput))
         }
         case Endpoint.update: {
-          const id = requireField(fields, 'id')
           const raw = asObject(fields.patch)
           const patch: AccountPatch = {}
           if (typeof raw.name === 'string') patch.name = raw.name
           if (raw.site === null) patch.site = null
           else if (typeof raw.site === 'string') patch.site = raw.site
           if (raw.tags === null) patch.tags = null
-          else if (Array.isArray(raw.tags)) patch.tags = raw.tags.filter((tag): tag is string => typeof tag === 'string')
-          const account = await store.update(id, patch)
-          return ok(await view(account))
-        }
-        case Endpoint.delete: {
-          const id = requireField(fields, 'id')
-          await store.remove(id)
-          for (const [sessionId, accountId] of currentAccounts) {
-            if (accountId === id) currentAccounts.delete(sessionId)
+          else {
+            const tags = optionalTags(raw.tags)
+            if (tags !== undefined) patch.tags = tags
           }
-          log.info('deleted account %s', id)
-          return ok({ id })
+          return ok(await service.update(requireField(fields, 'id'), patch))
         }
-        case Endpoint.saveState: {
-          const sessionId = requireField(fields, 'sessionId')
-          const id = requireField(fields, 'id')
-          const agent = requireAgent(sessionId)
-          const account = await requireAccount(id)
-          await bridge.save(agent, accessFor(account), signal)
-          const updated = await store.touch(account.id)
-          log.info('saved login state for %s from session %s', id, sessionId)
-          return ok(await view(updated))
-        }
-        case Endpoint.use: {
-          const sessionId = requireField(fields, 'sessionId')
-          const id = requireField(fields, 'id')
-          const agent = requireAgent(sessionId)
-          const account = await requireAccount(id)
-          await bridge.restore(agent, accessFor(account), signal)
-          currentAccounts.set(sessionId, id)
-          log.info('session %s switched to account %s', sessionId, id)
-          return ok({ account: await view(account), currentAccountId: id })
-        }
+        case Endpoint.delete:
+          return ok(await service.remove(requireField(fields, 'id')))
+        case Endpoint.saveState:
+          return ok(await service.saveState(requireField(fields, 'sessionId'), requireField(fields, 'id'), signal))
+        case Endpoint.use:
+          return ok(await service.use(requireField(fields, 'sessionId'), requireField(fields, 'id'), signal))
         default:
           return fail('unknown-endpoint', `未知端点：${endpoint}`)
       }
@@ -342,5 +264,13 @@ export function apply(ctx: Context, input: Config = {}): void {
     'test-account: remote route',
   )
 
-  log.info('account store rooted at %s (provider %s, state access %s)', store.root, config.mcpProvider, config.stateAccess)
+  if (config.agentTools) registerAgentTools(ctx, service)
+
+  log.info(
+    'account store rooted at %s (provider %s, state access %s, agent tools %s)',
+    service.root,
+    config.mcpProvider,
+    config.stateAccess,
+    config.agentTools ? 'on' : 'off',
+  )
 }

@@ -137,6 +137,7 @@ packages/
         stateAccess: direct   # direct | staged
         # stagePrefix: .dsh-test-account-storage-
         # toolTimeoutMs: 120000
+        agentTools: true      # 关闭则不给 Agent 暴露 account_* 工具
 ```
 
 | 字段 | 作用 |
@@ -144,6 +145,7 @@ packages/
 | `test-account.root` | 账号目录，默认 `${DSH_HOME:-~/.dsh}/test-accounts` |
 | `test-account.mcpProvider` | 浏览器工具命名空间 `mcp__<provider>__`，默认 `playwright-mcp` |
 | `test-account.stateAccess` | `direct` 直接把账号路径交给浏览器工具；`staged` 先在工作区落一个临时文件再搬运 |
+| `test-account.agentTools` | 是否向 Agent 暴露 `account_list` / `account_use` / `account_current`，默认 `true` |
 | `provider.caps` | 传给 `@playwright/mcp` 的能力，默认 `['storage']` |
 | `provider.allowUnrestrictedFileAccess` | 允许 storage 工具读写 Session 工作区之外的路径（账号目录需要），默认开 |
 | `provider.headless` | 是否无窗口；保存登录态必须人工登录，所以默认 `false` |
@@ -212,15 +214,18 @@ pnpm run verify        # 以上全跑，并做 client bundle 结构检查
 
 | 层级 | 内容 | 结论 |
 | --- | --- | --- |
-| 单元 | `account-store`：读写、id 校验、去重、清空可选字段、路径越界、脏 JSON | ✅ `pnpm run test` 21 项 |
+| 单元 | `account-store`：读写、id 校验、去重、清空可选字段、路径越界、脏 JSON | ✅ 12 项 |
 | 单元 | provider 参数拼装与 launch/attach 校验 | ✅ 12 项 |
-| 单元 | 浏览器桥：direct、工作区被拒后自动降级 staged、工具缺失/失败错误码 | ✅ 用模拟的工作区文件栅栏 |
+| 单元 | `AccountService`：保存/恢复、`session-not-live`、`state-missing`、删除清理记账、**两个 Session 各持一个账号互不覆盖**（§11.5） | ✅ 8 项（假 bridge + 假 Agent 注册表） |
+| 单元 | 浏览器桥：direct、工作区被拒后自动降级 staged、工具缺失/失败错误码 | ✅ 9 项，用模拟的工作区文件栅栏 |
+| 单元 | 插件接线：路由注册、三个 Agent 工具注册、`agentTools: false` 不注册、路由增删查与错误码 | ✅ 5 项（假 Cordis ctx） |
 | 构建 | `lib/client.js` 真的是 `window.__ModuleLoader__.load` 懒加载包 | ✅ `scripts/check-bundle.mjs` |
+| 集成 | `./install.sh <profile>` 在全新 `DSH_HOME` 上从零跑通：构建 → 初始化 profile → 装 4 个包 → 自动加入 `dsh.profile.bundles` → 能启动 | ✅ 脚本本身已实测 |
 | 集成 | 0.1.7-alpha.1 profile 装载三个插件，无未激活项；boot manifest 含本插件与四个 client 依赖；`/plugins/??…/client.js` 返回 200 | ✅ 独立 `DSH_HOME` |
 | 集成 | `POST /api/test-account` 真实 HTTP + 鉴权：增删改查、持久化、全部错误码、`session-not-live` 守卫 | ✅ curl 走完整流程 |
 | 集成 | `@playwright/mcp` 带 `--caps=storage` 时工具数为 41 且包含两个 storage 工具；不带时 24 且没有 | ✅ 直接起 MCP server 列工具 |
 | 集成 | 真实 Chrome：`browser_storage_state` 把登录态写到工作区外的账号目录（含 `cookies` / `origins`），`browser_set_storage_state` 再读回；去掉 `--allow-unrestricted-file-access` 时同路径被 `File access denied … outside allowed roots` 拒绝 | ✅ 正是降级路径存在的理由 |
-| 集成 | 真实浏览器 UI：头部入口渲染 → 打开右侧栏面板 → 读到 Host 已有账号 → 表单新建账号并落盘 → 无登录态时「使用账号」禁用 → 删除 | ✅ `pnpm run smoke:ui <url>` 9/9 通过，无 page error |
+| 集成 | 真实浏览器 UI：头部入口渲染 → 打开右侧栏面板 → 读到 Host 已有账号 → 表单新建账号并落盘 → 无登录态时「使用账号」禁用 → 删除 | ✅ `pnpm run smoke:ui <url>` 9/9 通过，无 page error；`install.sh` 新建的 profile 与已初始化过的 profile 各跑一遍 |
 | 手工 | 图形浏览器里「登录 → 保存登录态 → 换账号 → 恢复」 | ⏳ 需要人手动登录，见下 |
 
 `scripts/smoke-ui.mjs` 需要一个已经跑起来的实例：
@@ -247,15 +252,36 @@ npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081
 > 如果 CI 想跑，用 `mode: launch` + `--headless`，或 `mode: attach` 接一个已经登录的 CDP 端点
 > （attach 模式是独占的，一个 Session 占一个浏览器）。
 
-## 八、当前范围与后续
+## 八、Agent 集成
 
-MVP 已完成：账号 CRUD、保存/更新/恢复登录态、当前账号展示、Session 隔离。
+除了面板，插件还向 Agent 暴露三个工具（设计文档 §15 Phase 5），让「当前用哪个账号」对人和对
+Agent 是同一份事实：
+
+| 工具 | 参数 | 作用 |
+| --- | --- | --- |
+| `account_list` | — | 列账号与登录态状态，并指出本 Session 当前账号。只读 |
+| `account_use` | `id` | 把该账号的 `storageState` 恢复到**调用方 Session 自己的浏览器**，并标记当前账号 |
+| `account_current` | — | 查询本 Session 当前账号 |
+
+它们与面板共用同一个 `AccountService`，所以校验、错误码、Session 记账完全一致；浏览器目标由
+`exec.agent.id` 决定，工具既不接收 `sessionId`，也不接收任何凭据。配置 `agentTools: false` 可整体关掉。
+
+于是 Agent 排查问题可以直接：
+
+```text
+account_list    → 看到 vip-us / free-us 以及谁已经保存过登录态
+account_use     → 切到 free-us（该账号的 cookies + localStorage 灌进当前浏览器）
+                → 自己重新 browser_navigate 到目标页面确认身份，再继续 E2E / 排障
+```
+
+## 九、当前范围与后续
+
+已完成：账号 CRUD、保存/更新/恢复登录态、当前账号展示、Session 隔离、Agent 工具。
 
 暂不包含（与设计文档 §1 一致）：用户名密码自动登录、OAuth/SSO/验证码、登录态自动续期、Cookie 手工
 编辑、账号过期自动检测。
 
-后续可加（设计文档 §15 Phase 5）：把 `account_list` / `account_use` / `account_current` 暴露成 Agent
-工具；Host 侧的 `AccountStore` 与 RPC 处理器已经按可复用方式拆开，加工具只需再包一层 `ctx.tools.register`。
+后续可加：登录态过期探活（`verifyUrl`）、账号分组/搜索、把登录态导出给 CI 的 `mode: attach` 流程。
 
 ## 参考
 

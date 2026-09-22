@@ -56,18 +56,46 @@ page.on('console', (message) => {
   if (message.type() === 'error') errors.push(message.text())
 })
 
+/**
+ * Clear whatever first-run overlay is in the way.
+ *
+ * A fresh DSH home shows a model-API-key dialog ("稍后配置" defers it) and may
+ * follow it with a welcome notice; that dialog can also appear a few seconds
+ * after load, so this polls rather than checking once.
+ * @param page - the page under test.
+ */
+async function dismissOverlays(page) {
+  const labels = ['稍后配置', '继续', '知道了', '开始使用', '跳过', '关闭']
+  let cleanRounds = 0
+  for (let round = 0; round < 14; round += 1) {
+    let clicked = false
+    for (const label of labels) {
+      const button = page.getByRole('button', { name: label })
+      if ((await button.count()) > 0 && (await button.first().isVisible())) {
+        await button.first().click({ force: true }).catch(() => {})
+        clicked = true
+        break
+      }
+    }
+    const masked = (await page.locator('div[aria-hidden="true"][class*="_mask_"]').count()) > 0
+    if (!clicked && !masked) {
+      cleanRounds += 1
+      // The dialog can render several seconds after load, so stay alert for a while.
+      if (cleanRounds >= 3) return
+    } else {
+      cleanRounds = 0
+      if (!clicked && masked) await page.keyboard.press('Escape').catch(() => {})
+    }
+    await page.waitForTimeout(1500)
+  }
+}
+
 try {
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(7000)
+  await dismissOverlays(page)
 
-  // A fresh DSH home asks for a model API key; this smoke test needs the shell.
-  const later = page.getByRole('button', { name: '稍后配置' })
-  if ((await later.count()) > 0) {
-    await later.first().click()
-    await page.waitForTimeout(2000)
-  }
-
-  await page.getByText('新会话', { exact: true }).first().click({ timeout: 15_000 })
+  await page.getByText('新会话', { exact: true }).first().click({ timeout: 20_000 })
   await page.waitForTimeout(4000)
   const composer = page.locator('textarea, [contenteditable="true"]').first()
   await composer.click()

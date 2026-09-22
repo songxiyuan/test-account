@@ -16,12 +16,19 @@
 
 ```text
 packages/test-account/                         # 账号插件（Host + Client）
-  src/                                         # Host 半：store / browser 桥 / 鉴权 Fetch 路由
+  src/
+    index.ts                                   # Host：Config、接线、鉴权 Fetch 路由
+    accounts.ts                                # Host：AccountService（路由与 Agent 工具共用）
+    account-store.ts                           # accounts.json / states/*.json 的纯文件读写
+    browser-storage.ts                         # 调当前 Session 的 MCP storage 工具
+    agent-tools.ts                             # account_list / account_use / account_current
+    types.ts                                   # 共享类型、路由与端点名
   client/                                      # Client 半：React 面板，esbuild 打成 lib/client.js
   cordis.patch.yml                             # bundle 补丁，声明该插件依赖的运行时组成
 packages/browser-use-playwright-mcp-storage/   # 带 --caps=storage 的 Playwright MCP provider
 scripts/build-client.mjs                       # 客户端 bundle 打包（复刻 DSH 的懒加载 CJS 契约）
 scripts/check-bundle.mjs                       # 客户端 bundle 结构检查
+scripts/smoke-ui.mjs                           # 真机 Chrome 的 UI 冒烟（需要一个已启动实例）
 doc/dsh-test-account-plugin-design.md          # 原始设计方案（只读参考）
 ```
 
@@ -51,6 +58,11 @@ doc/dsh-test-account-plugin-design.md          # 原始设计方案（只读参�
   `agent` 来自 `ctx.agents.get(sessionId)`。`ctx.browserUse` 只是 provider 注册表，没有浏览器 API。
 - MCP 文件访问默认限制在 Session 工作区内；账号目录在工作区外，所以 provider 默认带
   `--allow-unrestricted-file-access`，同时 `browser-storage.ts` 保留 staged 降级路径（有测试覆盖）。
+- 面板（Fetch 路由）与 Agent 工具必须共用 `AccountService`，不要在 `index.ts` / `agent-tools.ts`
+  里重复 id 校验、状态测量、Session 记账或错误码。
+- Agent 工具用 `exec.agent.id` 定位浏览器，不要新增 `sessionId` 参数，也不要让工具接收任何凭据。
+- `Agent` 的身份字段是 `id`（不是 `sessionId`）。`@deepseek-ai/dsh-tools` 等按需运行时导入由
+  profile 的 module fallback 解析，**不要**把它们打进客户端 bundle。
 
 ## 构建与验证
 

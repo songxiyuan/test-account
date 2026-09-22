@@ -30,6 +30,8 @@ echo "==> initializing profile '${PROFILE}' from the web template (no-op if it e
 "${DSH[@]}" --profile "$PROFILE" --from-default-profile web --dump-config >/dev/null
 
 echo "==> installing plugins into profile '${PROFILE}'"
+echo "    (the 'declares no dsh.bundle' warnings are expected for the three plain"
+echo "     plugins; only @dsh-test-account/test-account carries the bundle patch)"
 "${DSH[@]}" plugin --profile "$PROFILE" add \
   "$ROOT/packages/test-account" \
   "$ROOT/packages/browser-use-playwright-mcp-storage" \
@@ -38,14 +40,18 @@ echo "==> installing plugins into profile '${PROFILE}'"
 
 cat <<EOF
 
-test-account installed into profile: ${PROFILE}
+==> done
+
+  profile          ${PROFILE}  (~/.dsh/profiles/${PROFILE} unless DSH_HOME says otherwise)
+  account store    \${DSH_HOME:-~/.dsh}/test-accounts
+  browser provider @dsh-test-account/browser-use-playwright-mcp-storage (--caps=storage)
 
 Start it with:
 
   npx -y @deepseek-ai/dsh@${DSH_VERSION} --profile ${PROFILE} web --port 3081
 
-Then open a Session, expand the right Sidebar and pick 「测试账号」 from the
-header shortcut or the Sidebar guide. The first save needs a browser that is
-already logged in, so leave the Playwright provider visible
-(cordis.patch.yml ships headless: false).
+Then send one message in a Session (the header shortcut only mounts once a
+Session has a turn), and use 「测试账号」 from the conversation header or from
+the right Sidebar's guide. Saving a login state needs a browser you already
+logged into by hand, so the provider ships headless: false.
 EOF
