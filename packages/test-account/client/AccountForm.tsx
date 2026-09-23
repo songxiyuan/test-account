@@ -1,6 +1,8 @@
 /**
- * Add/edit form for one test account. Rendered inline in the panel rather than
- * as a floating dialog so it works in a narrow Sidebar without a z-index seat.
+ * Edit form for one test account's metadata. Rendered inline in the panel
+ * rather than as a floating dialog so it works in a narrow Sidebar without a
+ * z-index seat. Accounts are created by the Agent's `account_save` tool, so this
+ * form only ever edits an existing account.
  * @module
  */
 
@@ -9,8 +11,8 @@ import type { AccountDraft, AccountView } from './contract.ts'
 
 /** Props of {@link AccountForm}. */
 export interface AccountFormProps {
-  /** Account being edited, or `undefined` when adding. */
-  account?: AccountView
+  /** Account being edited. */
+  account: AccountView
   /** Whether a submit is in flight. */
   busy: boolean
   /** Cancel the form. */
@@ -27,17 +29,17 @@ export interface AccountFormProps {
  * @param account - account being edited.
  * @returns the initial draft.
  */
-function draftOf(account: AccountView | undefined): AccountDraft {
+function draftOf(account: AccountView): AccountDraft {
   return {
-    id: account?.id ?? '',
-    name: account?.name ?? '',
-    site: account?.site ?? '',
-    tags: (account?.tags ?? []).join(', '),
+    id: account.id,
+    name: account.name,
+    site: account.site ?? '',
+    tags: (account.tags ?? []).join(', '),
   }
 }
 
 /**
- * One account's add/edit form.
+ * One account's edit form.
  * @param props - form props.
  */
 export function AccountForm({ account, busy, onCancel, onSubmit }: AccountFormProps): JSX.Element {
@@ -47,8 +49,7 @@ export function AccountForm({ account, busy, onCancel, onSubmit }: AccountFormPr
     setDraft(draftOf(account))
   }, [account])
 
-  const editing = account !== undefined
-  const valid = draft.name.trim() !== '' && draft.id.trim() !== ''
+  const valid = draft.name.trim() !== ''
 
   return (
     <form
@@ -57,7 +58,7 @@ export function AccountForm({ account, busy, onCancel, onSubmit }: AccountFormPr
         event.preventDefault()
         if (!valid || busy) return
         onSubmit({
-          id: draft.id.trim().toLowerCase(),
+          id: draft.id,
           name: draft.name.trim(),
           site: draft.site.trim(),
           tags: draft.tags.trim(),
@@ -75,13 +76,7 @@ export function AccountForm({ account, busy, onCancel, onSubmit }: AccountFormPr
       </label>
       <label style={styles.label}>
         <span style={styles.labelText}>ID</span>
-        <input
-          style={{ ...styles.input, ...(editing ? styles.inputDisabled : {}) }}
-          value={draft.id}
-          placeholder="vip-us"
-          readOnly={editing}
-          onChange={(event) => setDraft({ ...draft, id: event.target.value })}
-        />
+        <input style={{ ...styles.input, ...styles.inputDisabled }} value={draft.id} readOnly />
       </label>
       <label style={styles.label}>
         <span style={styles.labelText}>站点</span>
@@ -101,10 +96,10 @@ export function AccountForm({ account, busy, onCancel, onSubmit }: AccountFormPr
           onChange={(event) => setDraft({ ...draft, tags: event.target.value })}
         />
       </label>
-      <p style={styles.hint}>只保存身份元数据，不会记录用户名或密码。</p>
+      <p style={styles.hint}>只保存在账号表里的身份元数据，不会记录用户名或密码。</p>
       <div style={styles.actions}>
         <button type="submit" style={{ ...styles.button, ...styles.primary }} disabled={!valid || busy}>
-          {busy ? '提交中…' : editing ? '保存' : '添加'}
+          {busy ? '提交中…' : '保存'}
         </button>
         <button type="button" style={styles.button} onClick={onCancel} disabled={busy}>
           取消

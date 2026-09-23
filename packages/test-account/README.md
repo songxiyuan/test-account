@@ -8,7 +8,8 @@
 - **bundle 补丁**（`cordis.patch.yml`）：挂载本仓库的 storage provider，以及本插件自身。
 
 它不启动浏览器、不存密码、不做自动登录；浏览器操作全部转发给当前 Session 已经持有的
-Playwright MCP 工具（由 `@songxiyuan/playwright-mcp-storage` 按 Session 挂载）。
+Playwright MCP 工具（由 `@songxiyuan/playwright-mcp-storage` 按 Session 挂载）。账号由 Agent 在对话中
+登录后用 `account_save` 登记，面板只负责查看、切换、编辑元数据与删除。
 
 ## 安装
 
@@ -49,7 +50,7 @@ dsh plugin --profile test-account add \
 | 端点 | 载荷 | 结果 |
 | --- | --- | --- |
 | `accounts/list` | `{ sessionId? }` | `AccountsSnapshot`（含 `hasState` / `stateBytes` / `stateUpdatedAt`） |
-| `accounts/create` | `{ input: { id, name, site?, tags? } }` | `AccountView` |
+| `accounts/create` | `{ input: { id, name, site?, tags? } }` | `AccountView`（面板不再调用，留给测试 / 脚本） |
 | `accounts/update` | `{ id, patch: { name?, site?, tags? } }` | `AccountView` |
 | `accounts/delete` | `{ id }` | `{ id }` |
 | `accounts/saveState` | `{ sessionId, id }` | `AccountView`（`browser_storage_state`） |
@@ -69,27 +70,30 @@ interface Config {
   stateAccess?: 'direct' | 'staged'  // 默认 'direct'
   stagePrefix?: string          // 默认 '.dsh-test-account-storage-'
   toolTimeoutMs?: number        // 默认 120000
-  agentTools?: boolean          // 默认 true：向 Agent 暴露下面三个工具
+  agentTools?: boolean          // 默认 true：向 Agent 暴露下面四个工具
 }
 ```
 
 ## Agent 工具（设计文档 Phase 5）
 
-`agentTools` 打开时，插件会注册三个模型可见的工具。它们和面板走同一个 `AccountService`，
+`agentTools` 打开时，插件会注册四个模型可见的工具。它们和面板走同一个 `AccountService`，
 所以校验、错误码、Session 记账完全一致；工具操作的是**调用方 Session 自己的浏览器**
 （`exec.agent.id`），不需要也不接受 `sessionId` 参数。
 
 | 工具 | 参数 | 作用 |
 | --- | --- | --- |
 | `account_list` | — | 列出账号（id / 名称 / 站点 / 标签 / 登录态是否已保存）与本 Session 当前账号。只读 |
+| `account_save` | `id`, `name`, `site?`, `tags?` | 把当前浏览器的登录态登记为账号（同 id 则更新并覆盖），并把本 Session 标为它 |
 | `account_use` | `id` | 把该账号的 `storageState` 恢复到本 Session 的浏览器，并把本 Session 的当前账号标为它 |
 | `account_current` | — | 查询本 Session 当前使用哪个账号 |
 
-这样「当前 Session 正在用哪个账号」对人和对 Agent 是同一份事实，Agent 也能按指定身份继续
-浏览器操作 / E2E / 排障，而不是要人在对话里额外说明。
+这是账号的唯一创建入口：面板的「+ 添加」已移除。典型流程是用户把网址与凭据发在对话里，Agent 用
+`browser_navigate` / `browser_type` / `browser_fill_form` / `browser_click` 完成登录，再调用
+`account_save` 记录结果。这样「当前 Session 正在用哪个账号」对人和对 Agent 是同一份事实，Agent 也能按
+指定身份继续浏览器操作 / E2E / 排障。
 
-安全性：`account_use` 只恢复已经由人手动登录并保存过的 `storageState`，插件本身既不接收也不
-存储任何凭据；工具描述也明确要求调用后重新导航确认身份，不假设当前页面已刷新。
+安全性：`account_save` 只抓取浏览器在登录后已经持有的 `storageState`，`account_use` 只恢复已经保存过的
+`storageState`；两个工具本身既不接收也不存储任何凭据，工具描述也明确要求调用后重新导航确认身份。
 
 ## 日志
 
@@ -102,7 +106,7 @@ pnpm --filter @songxiyuan/test-account test
 ```
 
 `test/account-store.test.ts` 覆盖文件读写、id 校验、去重、清空可选字段、路径越界、脏 JSON；
-`test/accounts.test.ts` 用假的 browser bridge / Agent 注册表覆盖保存、恢复、错误码、
-删除时清理 Session 记账，以及**两个 Session 各持一个账号互不覆盖**（设计文档 §11.5）；
-`test/browser-storage.test.ts` 用一个模拟工作区文件栅栏的假 tool runtime，覆盖 `direct`、工作区被拒后
-自动降级到 `staged`、`staged` 直连、工具缺失与工具失败的错误码。
+`test/accounts.test.ts` 用假的 browser bridge / Agent 注册表覆盖 `account_save` 的 upsert 与 Session
+标记、保存、恢复、错误码、删除时清理 Session 记账，以及**两个 Session 各持一个账号互不覆盖**
+（设计文档 §11.5）；`test/browser-storage.test.ts` 用一个模拟工作区文件栅栏的假 tool runtime，覆盖
+`direct`、工作区被拒后自动降级到 `staged`、`staged` 直连、工具缺失与工具失败的错误码。

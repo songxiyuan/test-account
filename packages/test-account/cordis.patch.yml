@@ -21,5 +21,5 @@
       config:
         mcpProvider: playwright-mcp
         stateAccess: direct
-        # account_list / account_use / account_current; set false to hide them.
+        # account_list / account_save / account_use / account_current; false hides them.
         agentTools: true

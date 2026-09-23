@@ -85,11 +85,11 @@ test('defaults enable the Agent tools and the account directory follows DSH_HOME
   assert.ok(config.root.endsWith('test-accounts'))
 })
 
-test('applying registers one route plus the three Agent tools', async () => {
+test('applying registers one route plus the four Agent tools', async () => {
   await withRoot(async (root) => {
     const { ctx, toolNames, routes, effects } = harness()
     apply(ctx, { root })
-    assert.deepEqual(toolNames, ['account_list', 'account_use', 'account_current'])
+    assert.deepEqual(toolNames, ['account_list', 'account_save', 'account_use', 'account_current'])
     assert.equal(routes.length, 1)
     assert.equal(routes[0]?.path, '/api/test-account')
     assert.deepEqual(routes[0]?.methods, ['POST'])

@@ -53,7 +53,7 @@ export interface Config {
   stagePrefix?: string
   /** Upper bound on one browser storage tool call, in milliseconds. */
   toolTimeoutMs?: number
-  /** Whether to publish `account_list` / `account_use` / `account_current` to Agents. */
+  /** Whether to publish `account_list` / `account_save` / `account_use` / `account_current` to Agents. */
   agentTools?: boolean
 }
 

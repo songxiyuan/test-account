@@ -60,7 +60,7 @@ export function createAccountPanel(): (props: AccountPanelProps) => JSX.Element 
     const [error, setError] = useState<string | undefined>(undefined)
     const [notice, setNotice] = useState<string | undefined>(undefined)
     const [busy, setBusy] = useState<string | undefined>(undefined)
-    const [editing, setEditing] = useState<'new' | string | undefined>(undefined)
+    const [editing, setEditing] = useState<string | undefined>(undefined)
     const [confirmingDelete, setConfirmingDelete] = useState<string | undefined>(undefined)
 
     const refresh = useCallback(
@@ -120,49 +120,16 @@ export function createAccountPanel(): (props: AccountPanelProps) => JSX.Element 
               当前账号：{current === undefined ? '未选择（沿用浏览器现状）' : current.name}
             </p>
           </div>
-          <button
-            type="button"
-            style={{ ...styles.button, ...styles.primary }}
-            onClick={() => {
-              setNotice(undefined)
-              setEditing(editing === 'new' ? undefined : 'new')
-            }}
-            disabled={busy !== undefined}
-          >
-            {editing === 'new' ? '收起' : '+ 添加'}
-          </button>
         </header>
-
-        {editing === 'new' && (
-          <AccountForm
-            busy={busy === 'new'}
-            onCancel={() => setEditing(undefined)}
-            onSubmit={(draft: AccountDraft) => {
-              void run(
-                'new',
-                () =>
-                  callRemote(Endpoint.create, {
-                    input: {
-                      id: draft.id,
-                      name: draft.name,
-                      ...(draft.site === '' ? {} : { site: draft.site }),
-                      ...(draft.tags === ''
-                        ? {}
-                        : { tags: draft.tags.split(',').map((tag) => tag.trim()).filter((tag) => tag !== '') }),
-                    },
-                  }),
-                `已添加账号 ${draft.name}`,
-              ).then(() => setEditing(undefined))
-            }}
-          />
-        )}
 
         {error !== undefined && <p style={styles.error}>{error}</p>}
         {notice !== undefined && <p style={styles.notice}>{notice}</p>}
 
         {snapshot === undefined && error === undefined && <p style={styles.empty}>正在读取账号列表…</p>}
         {snapshot !== undefined && snapshot.accounts.length === 0 && (
-          <p style={styles.empty}>还没有测试账号。点击「+ 添加」创建第一个。</p>
+          <p style={styles.empty}>
+            还没有测试账号。在对话里把网址与账号信息发给 AI，让它用浏览器登录后调用 account_save 保存。
+          </p>
         )}
 
         {groups.map((group) => (

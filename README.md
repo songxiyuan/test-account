@@ -1,15 +1,16 @@
 # dsh-test-account
 
-在 DSH 里管理测试账号登录态：一个账号列表面板，加「保存当前浏览器登录态 / 一键切换账号 /
-标记当前 Session 在用哪个账号」三件事。
+在 DSH 里管理测试账号登录态：**Agent 在对话中登录，插件保存登录态，面板负责查看与切换。**
 
-核心原则：**不内嵌 Playwright、不保存密码、不实现自动登录、不引入数据库。**
+核心原则：**不内嵌 Playwright、不保存密码、不实现自动登录、不引入数据库。** 凭据只出现在对话与页面
+输入框里；插件只落盘登录后的 cookies / localStorage（Playwright `storageState`）。
 
 ```text
-DSH Web 右侧栏「测试账号」面板
-        │  POST /api/test-account（Connection 的鉴权 /api 前缀）
+用户：把「网址 + 账号 + 密码」发给 Agent
         ▼
-@songxiyuan/test-account                ← 账号元数据 + states/*.json + Session→账号
+Agent：用当前 Session 的浏览器工具打开页面、填入并登录
+        ▼  account_save
+@songxiyuan/test-account                ← accounts.json + states/*.json + Session→账号
         │  ctx.tools.execute
         ▼
 mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
@@ -17,6 +18,8 @@ mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
 @songxiyuan/playwright-mcp-storage      ← 每个 live Session 一个 @playwright/mcp 进程
         ▼                                 （--caps=storage），挂在 Agent scope 上
 当前 Session 的 Chromium
+        ▲
+DSH Web 右侧栏「测试账号」面板 ── POST /api/test-account ──┘（只读列表 + 切换 / 编辑 / 删除）
 ```
 
 ## 一、安装
@@ -58,29 +61,23 @@ dsh --profile test-account --from-default-profile web --dump-config >/dev/null
 dsh plugin --profile test-account add ./packages/test-account ./packages/playwright-mcp-storage
 ```
 
-三条命令都在**仓库根目录**执行（`dsh plugin` 会把相对路径锚到当前目录）、都幂等，可重复跑。没有 `dsh`
+三条命令都在**仓库根目录**执行（`dsh plugin` 会把相对路径锚到当前目录）、都幂等。没有 `dsh`
 时把命令里的 `dsh` 换成 `npx -y @deepseek-ai/dsh@0.1.5-rc.3`。
 
-装进去的是 `link:`（profile 的 `node_modules` 软链回仓库），所以改完源码只要 `pnpm run build` +
-重启该 profile 就生效，**不必重跑第 3 条**。0.1.1 之前装过 0.1.7 browser-use 栈或 `@dsh-test-account/*`
-旧 scope 的 profile，按 §1.6 的对应行手工清掉。
-
-> **第 1 条不能省**：`dsh plugin add <本地目录>` 只建一个 `link:`，不会替你 `build`（`prepack` 只在
-> `npm pack` / `publish` 时跑，那是路线 B 的 tarball 才有的）。漏掉就是"装成功但没面板"。
->
-> **第 2 条不能省**：profile 不存在时 `dsh plugin` 会自己建，但用的是 `DEFAULT_PROFILE_BUNDLES =
-> ["@deepseek-ai/dsh-base"]`——没有 `@deepseek-ai/dsh-web-app` 就没有 webserver / connection /
-> 右侧栏 slot，`/api` 也不存在。而 `--from-default-profile` 对已存在的 profile 一律拒绝，对 `web` /
-> `acp` / `headless` / `sdk` 这类内置模板名更是只看名字就拒绝（`./… web` 会报 `is shipped`），
-> 所以必须先判断再初始化。
+- **第 1 条不能省**：`dsh plugin add <本地目录>` 只建 `link:`，不跑 `build`（`prepack` 只在
+  `npm pack` / `publish` 时执行）。漏掉就是"装成功但没面板"。
+- **第 2 条不能省**：`dsh plugin` 自己建的 profile 用 `DEFAULT_PROFILE_BUNDLES =
+  ["@deepseek-ai/dsh-base"]`，没有 `@deepseek-ai/dsh-web-app` 就没有 webserver / connection /
+  右侧栏 slot，`/api` 也不存在；而 `--from-default-profile` 对已存在或内置模板名的 profile 一律拒绝。
+- `link:` 是活挂：改完源码 `pnpm run build` + 重启该 profile 即生效，不必重跑第 3 条。0.1.1 之前装过
+  0.1.7 browser-use 栈或 `@dsh-test-account/*` 旧 scope 的 profile，按 §1.6 对应行清掉。
 
 ### 1.3 路线 B：公共 npm
 
 两个包都发在公共 npm（scope `@songxiyuan`），**装的时候不需要 token、不需要 `.npmrc`**：
 
 ```bash
-# 0) profile 不存在时先按 web 模板初始化 —— 别跳过：
-#    `dsh plugin` 自己建的 profile 只带 `@deepseek-ai/dsh-base`，没有 web app，也就没有面板
+# 0) profile 不存在时先按 web 模板初始化（同 §1.2 第 2 条，理由相同）
 test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
 dsh --profile test-account --from-default-profile web --dump-config >/dev/null
 
@@ -90,25 +87,17 @@ dsh plugin --profile test-account add \
   @songxiyuan/playwright-mcp-storage
 ```
 
-升级：`dsh plugin --profile test-account update`，然后重启该 profile 的 DSH 进程。
-
-```bash
-# 把最新版本拉进 profile 的 package.json / lockfile（不改 profile 的 profile/bundles 结构）
-dsh plugin --profile test-account update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage
-```
-
 | 场景 | 命令 |
 | --- | --- |
 | 首次安装 | 上面两条（初始化 + `add`） |
-| 日常升级到已发布的最新版 | `dsh plugin --profile <p> update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`（或整表 `update`），再重启该 profile |
+| 升级到最新版 | `dsh plugin --profile <p> update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`，再重启该 profile |
 | 装指定版本 | `dsh plugin --profile <p> add @songxiyuan/test-account@0.1.1 @songxiyuan/playwright-mcp-storage@0.1.1` |
 
-> **从 GitHub Packages 迁过来**：0.1.0 只在 GitHub Packages 上，profile 的 lockfile 里记的是
-> `npm.pkg.github.com`。公共 npm 的 0.1.1 与它同 scope 同名，直接 `update` 到 `^0.1.0` 范围外即可换源；
-> 若 lockfile 仍指向 `npm.pkg.github.com`（报 `401` / `404`），在 profile 目录里强制重解析：
-> `dsh plugin --profile <p> add @songxiyuan/test-account@0.1.1 @songxiyuan/playwright-mcp-storage@0.1.1`。
+> **从 GitHub Packages 迁过来**：0.1.0 只在 GitHub Packages 上。公共 npm 的 0.1.1 与它同 scope 同名，
+> 直接 `update` 到 `^0.1.0` 范围外即可换源；若 lockfile 仍指向 `npm.pkg.github.com`（报 `401` / `404`），
+> 强制重解析：`dsh plugin --profile <p> add @songxiyuan/test-account@0.1.1 @songxiyuan/playwright-mcp-storage@0.1.1`。
 > 装完把 `~/.npmrc` 里为 GitHub Packages 加的 `@songxiyuan:registry=…` 与
-> `//npm.pkg.github.com/:_authToken=…` 两行删掉，避免以后又走回旧源。
+> `//npm.pkg.github.com/:_authToken=…` 两行删掉。
 
 ### 1.4 安装后自检（必须全绿再继续）
 
@@ -150,21 +139,21 @@ dsh --profile test-account --port 3081
 > launchd 托管的 GUI 用 `launchctl kickstart -k gui/$(id -u)/com.nomis.dsh-web`。回滚：恢复
 > `~/.dsh/profiles/<name>/{package.json,pnpm-lock.yaml}` 后重跑 `dsh plugin --profile <name> install`。
 
-> **浏览器本体**：provider 默认自动探测本机 Chrome / Chromium / Edge 并复用，装了 Chrome 的机器开箱
-> 即用。都没有时第一次保存登录态会提示两条出路：`npx @playwright/mcp install-browser chrome-for-testing`，
-> 或显式配 `executablePath`。详见 [`packages/playwright-mcp-storage/README.md`](packages/playwright-mcp-storage/README.md#浏览器本体)。
+> **浏览器本体**：provider 默认自动探测本机 Chrome / Chromium / Edge 并复用。都没有时第一次保存登录态
+> 会提示两条出路：`npx @playwright/mcp install-browser chrome-for-testing`，或显式配 `executablePath`。
+> 详见 [`packages/playwright-mcp-storage/README.md`](packages/playwright-mcp-storage/README.md#浏览器本体)。
 
 ### 1.6 故障 → 处理
 
 | 症状 | 处理 |
 | --- | --- |
 | `pnpm: command not found` | `corepack enable && corepack prepare pnpm@11.9.0 --activate` |
-| `npm error ENOENT ... _npx/<hash>/package.json` | npx 缓存损坏：`rm -rf ~/.npm/_npx` 后重跑，或改用 PATH 上的 `dsh`（§1.2 里 `dsh` 的替换反过来） |
-| `profile "web" is shipped and cannot be a custom profile target` | 对**已存在**或**叫内置模板名**的 profile 跑了 `--from-default-profile`；§1.2 第 2 条的 `test -f … \|\|` 就是为挡住它 |
-| profile 里残留 0.1.7 browser-use 栈或 `@dsh-test-account/*` 旧 scope | 0.1.1 之前的旧 profile 才会命中：先 `grep -E 'browser-use\|@dsh-test-account/' "${DSH_HOME:-$HOME/.dsh}/profiles/<p>/package.json"`，有输出再 `dsh plugin --profile <p> remove @deepseek-ai/dsh-browser-use @deepseek-ai/dsh-experimental-browser-use-runtime @songxiyuan/browser-use-playwright-mcp-storage @dsh-test-account/test-account @dsh-test-account/playwright-mcp-storage` |
+| `npm error ENOENT ... _npx/<hash>/package.json` | npx 缓存损坏：`rm -rf ~/.npm/_npx` 后重跑，或改用 PATH 上的 `dsh` |
+| `profile "web" is shipped and cannot be a custom profile target` | 对**已存在**或叫内置模板名的 profile 跑了 `--from-default-profile`；§1.2 第 2 条的 `test -f … \|\|` 就是为挡住它 |
+| profile 里残留 0.1.7 browser-use 栈或 `@dsh-test-account/*` 旧 scope | 先 `grep -E 'browser-use\|@dsh-test-account/' "${DSH_HOME:-$HOME/.dsh}/profiles/<p>/package.json"`，有输出再 `dsh plugin --profile <p> remove @deepseek-ai/dsh-browser-use @deepseek-ai/dsh-experimental-browser-use-runtime @songxiyuan/browser-use-playwright-mcp-storage @dsh-test-account/test-account @dsh-test-account/playwright-mcp-storage` |
 | `error: web takes none of parent --profile …` | 0.1.5 的 `web` 子命令写死 `--profile web`；改跑 `dsh --profile <name> --port 3081` |
-| `ERR_PNPM_FETCH_401` / `404 … npm.pkg.github.com` | profile 的 lockfile 还停在旧的 GitHub Packages 源；按 [§1.3](#13-路线-b公共-npm) 的迁移步骤强制重解析到公共 npm |
-| `ERR_PNPM_FETCH_401 … registry.npmjs.org` | 公共 npm 的公开包匿名可装；报 401 说明 `~/.npmrc` 里有失效的 `_authToken`/scope 映射，临时用 `npm_config_userconfig=/dev/null` 复跑定位 |
+| `ERR_PNPM_FETCH_401` / `404 … npm.pkg.github.com` | lockfile 还停在旧的 GitHub Packages 源；按 [§1.3](#13-路线-b公共-npm) 强制重解析 |
+| `ERR_PNPM_FETCH_401 … registry.npmjs.org` | 公开包匿名可装；报 401 说明 `~/.npmrc` 有失效的 `_authToken`/scope 映射，临时用 `npm_config_userconfig=/dev/null` 复跑定位 |
 | 装上了，但右侧栏/对话头没有「测试账号」 | profile 是 `dsh plugin` 顺手建的、没有 web app；或 Session 还没有 turn；或装进运行中的 profile 后没重启 |
 | `Browser "chrome-for-testing" is not installed` | 装本机 Chrome / Chromium / Edge；或 `npx @playwright/mcp install-browser chrome-for-testing`；或配 `provider.executablePath` |
 | `File access denied ... outside allowed roots` | 用本仓库的 storage provider（默认带 `--allow-unrestricted-file-access`） |
@@ -200,20 +189,30 @@ profile_checks: { dependencies_present: 2, bundles_contains: "@songxiyuan/test-a
 start: "dsh --profile test-account --port 3081"
 verify: "pnpm run verify"
 account_store: "${DSH_HOME:-~/.dsh}/test-accounts"
+agent_tools: [account_list, account_save, account_use, account_current]
 ```
 
 ## 二、用起来
 
-1. 打开一个 Session，在右侧栏点「测试账号」（对话头快捷按钮，或右侧栏 `+` →「测试账号」）。
+1. 打开一个 Session：右侧栏 `+` →「测试账号」，或点对话头部的「测试账号」。
 
    > 头部按钮挂在对话头上，所以**刚新建、还没发过消息的空 Session**看不到它；右侧栏本身也是 Session
    > 级的，没有 Session 时不存在。
-2. 「+ 添加」建账号：只需要名称 / ID / 站点 / 标签，**不填用户名密码**。
-3. 在浏览器里手动登录某个测试账号，回到面板点「保存当前登录态」。
-4. 换账号时点「使用账号」，插件把对应 `storageState` 灌回当前 Session 的浏览器。
-5. 登录过期后重新登录，点「更新登录态」覆盖即可。
 
-面板显示每个 Session 当前用的是哪个账号；不同 Session 的记录互不覆盖。
+2. 在对话里把站点和凭据告诉 Agent，例如：
+
+   > 打开 `https://example.com/login`，用 `test@example.com` / `hunter2` 登录，成功后保存成账号 `vip-us`。
+
+3. Agent 用当前 Session 的浏览器打开页面、填入账号密码并提交登录；**确认已登录后**调用
+   `account_save`（`id` / `name`，可选 `site` / `tags`）。插件把这次登录的 `storageState` 落盘，并把
+   本 Session 的当前账号标为该账号。
+4. 换账号：面板点「使用账号」，或让 Agent 调用 `account_use`，插件把对应 `storageState` 灌回浏览器。
+5. 登录过期：让 Agent 重新登录并再 `account_save` 覆盖，或在浏览器里手工登录后点「更新登录态」。
+
+面板里还能编辑账号元数据（名称 / 站点 / 标签）和删除账号；**添加账号只能由 Agent 完成，面板不再提供
+「+ 添加」**。凭据不会进入插件：它只出现在对话和页面输入框里。
+
+Session→账号的记录按 Session 分开：A Session 切账号不影响 B，两个 Session 可以同时各用一个账号。
 
 ## 三、数据布局
 
@@ -251,7 +250,7 @@ ${DSH_HOME:-~/.dsh}/test-accounts/
       name: '@songxiyuan/playwright-mcp-storage'
       config:
         mode: launch          # launch | attach
-        headless: false       # 手工登录需要看得见浏览器
+        headless: false       # 手工登录 / 看得见页面
         allowUnrestrictedFileAccess: true
 
     - id: test-account
@@ -270,25 +269,29 @@ ${DSH_HOME:-~/.dsh}/test-accounts/
 | `test-account.root` | 账号目录，默认 `${DSH_HOME:-~/.dsh}/test-accounts` |
 | `test-account.mcpProvider` | 浏览器工具命名空间 `mcp__<provider>__`，默认 `playwright-mcp` |
 | `test-account.stateAccess` | `direct` 直接把账号路径交给浏览器工具；`staged` 先在工作区落临时文件再搬运 |
-| `test-account.agentTools` | 是否向 Agent 暴露 `account_list` / `account_use` / `account_current`，默认 `true` |
-| `provider.caps` | 传给 `@playwright/mcp` 的能力，默认 `['storage']` |
+| `test-account.agentTools` | 是否向 Agent 暴露 `account_*` 工具，默认 `true` |
+| `provider.caps` | 传给 `@playwright/mcp` 的能力，默认 `['storage']`（核心浏览器工具始终可用） |
 | `provider.allowUnrestrictedFileAccess` | 允许 storage 工具读写 Session 工作区之外的路径（账号目录需要），默认开 |
-| `provider.headless` | 是否无窗口；保存登录态必须人工登录，所以默认 `false` |
+| `provider.headless` | 是否无窗口，默认 `false` |
 | `provider.executablePath` | 显式指定浏览器（复用本机 Chrome），优先于自动探测 |
 | `provider.autoExecutablePath` | 默认 `true`：按平台探测本机已装的 Chrome / Chromium / Edge |
 
 ## 五、Agent 工具
 
-除了面板，插件还向 Agent 暴露三个工具，让「当前用哪个账号」对人和对 Agent 是同一份事实：
+`agentTools` 打开时，插件注册四个模型可见的工具。它们和面板走同一个 `AccountService`，所以校验、
+错误码、Session 记账完全一致；工具操作的是**调用方 Session 自己的浏览器**（`exec.agent.id`），
+既不接收 `sessionId`，也不接收任何凭据。
 
 | 工具 | 参数 | 作用 |
 | --- | --- | --- |
 | `account_list` | — | 列账号与登录态状态，并指出本 Session 当前账号。只读 |
-| `account_use` | `id` | 把该账号的 `storageState` 恢复到**调用方 Session 自己的浏览器**，并标记当前账号 |
+| `account_save` | `id`, `name`, `site?`, `tags?` | 把当前浏览器的登录态登记为账号（同 id 则更新并覆盖），并把本 Session 标为它 |
+| `account_use` | `id` | 把该账号的 `storageState` 恢复到本 Session 的浏览器，并标为当前账号 |
 | `account_current` | — | 查询本 Session 当前账号 |
 
-它们与面板共用同一个 `AccountService`，所以校验、错误码、Session 记账完全一致；浏览器目标由
-`exec.agent.id` 决定，工具既不接收 `sessionId`，也不接收任何凭据。配置 `agentTools: false` 可整体关掉。
+登录动作本身由 Agent 用通用浏览器工具（`browser_navigate` / `browser_type` / `browser_fill_form` /
+`browser_click`）完成，插件只负责在登录之后抓取 `storageState`。这样「正在用哪个账号」对人和对 Agent
+是同一份事实，Agent 也能按指定身份继续浏览器操作 / E2E / 排障。
 
 ## 六、开发与验证
 
@@ -312,92 +315,86 @@ pnpm run publish:npm   # 维护者发版：verify + 发布到公共 npm（regist
 真机冒烟（改动路由 / 工具执行 / provider 参数后跑，需要已有实例）：
 
 ```bash
-# 首次先按 §1.2 的三条命令装好 profile；之后改完源码只需 pnpm run build + 重启（link: 活挂）
 dsh --profile test-account --port 3081          # 记下打印的带 token URL
-
 pnpm run smoke:ui "http://127.0.0.1:3081/?token=..."                        # 只验面板
 pnpm run smoke:ui "http://127.0.0.1:3081/?token=..." -- --home ~/.dsh       # 连浏览器登录态一起验
 ```
 
 带 `--home` 时覆盖「面板 → 路由 → `ctx.tools.execute` → MCP → 真 Chrome → 落盘 → 恢复」整条链路。
 `--home` 段靠「最新 session 目录」定位 Session，同一个 `DSH_HOME` 里有别的实例在写 sessions 时会挑错
-（报 `session-not-live`），此时用全新 `DSH_HOME` 或先只跑面板段。保存登录态必须人工登录，所以
-「登录 → 保存 → 换账号 → 恢复」这一步不在自动化里。
+（报 `session-not-live`），此时用全新 `DSH_HOME` 或先只跑面板段。
 
 ## 七、几个来自真实代码的结论（与设计文档的差异）
 
 设计文档 `doc/dsh-test-account-plugin-design.md` 有几处和实际 DSH 代码不一致，实现按代码来：
 
 1. **客户端 UI 是 React 18，不是 Vue**：DSH 0.1.5 的客户端插件运行时是 React + slot 注册 +
-   `window.__ModuleLoader__.load` 懒加载 CJS，没有 Vue 入口，所以是 `AccountPanel.tsx`。
+   `window.__ModuleLoader__.load` 懒加载 CJS，所以是 `AccountPanel.tsx`。
 2. **storage 工具需要 `--caps=storage`**：`@playwright/mcp@0.0.80` 里 `browser_storage_state` /
    `browser_set_storage_state` 的 capability 是 `storage`，而官方 Playwright provider 把参数写死成
-   `--browser chromium --isolated`、没有透传口子——这就是本仓库自带 `playwright-mcp-storage` 的唯一原因。
-   其余官方 provider（`chrome-devtools-mcp` / `stagehand-native`）都没有 storageState 能力。
-3. **Host↔Client 用自定义 Fetch 路由**：Typert Remote 的代码生成器不随 npm 发布；`ctx.connection.rpc.handle`
-   对插件不可用（内部 `owner.webServer` 会被 Cordis context tracing 解析回 connection 自己的 scope，
-   抛 `cannot get property "webServer" without inject`）；`rpc.intercept('/api', …)` 被 Typert gateway 独占。
-   最终用 `ctx.connection.fetch.register({ path: '/api/test-account', methods: ['POST'] })`，天然走 `/api`
-   的 Origin 校验与浏览器 token 鉴权。
+   `--browser chromium --isolated`、没有透传口子——这就是自带 `playwright-mcp-storage` 的唯一原因。
+3. **Host↔Client 用自定义 Fetch 路由**：`ctx.connection.rpc.handle` 对插件不可用（内部 `owner.webServer`
+   会被 Cordis context tracing 解析回 connection 自己的 scope），`rpc.intercept('/api', …)` 被 Typert
+   gateway 独占。最终用 `ctx.connection.fetch.register({ path: '/api/test-account', methods: ['POST'] })`，
+   天然走 `/api` 的 Origin 校验与浏览器 token 鉴权。
 4. **浏览器操作走 `ctx.tools.execute`**：工具名 `mcp__playwright-mcp__browser_storage_state` /
-   `browser_set_storage_state`，`agent` 由 `ctx.agents.get(sessionId)` 取得——这就是「复用当前 Session 的
-   浏览器」的落点。插件不碰任何浏览器 API，只转发这一个调用。
+   `browser_set_storage_state`，`agent` 由 `ctx.agents.get(sessionId)` 取得。插件不碰浏览器 API，只转发
+   这一个调用。
 5. **不依赖 DSH Browser Use**：`@deepseek-ai/dsh-browser-use` 与
-   `dsh-experimental-browser-use-runtime` npm 上最低只有 `0.1.6-alpha.1`（0.1.5 线没有）。provider 改用
-   0.1.5 自带的 `@deepseek-ai/dsh-mcp-client`：监听 `agent/created` + `createScope(ctx, agent)`，给每个 live
-   Agent 挂一个 `@playwright/mcp` 子进程；Agent 结束或插件卸载时 dispose 作用域关掉进程，`tools/execute`
-   上还有一道守卫，别的 Session 调不到这套工具。`attach` 模式独占（同一时刻只服务一个 live Session）。
+   `dsh-experimental-browser-use-runtime` 在 0.1.5 线不存在（npm 最低 `0.1.6-alpha.1`）。provider 改用
+   0.1.5 自带的 `@deepseek-ai/dsh-mcp-client`：监听 `agent/created` + `createScope(ctx, agent)`，给每个
+   live Agent 挂一个 `@playwright/mcp` 子进程，Agent 结束或插件卸载时 dispose 作用域关掉进程；
+   `tools/execute` 上还有一道守卫，别的 Session 调不到这套工具。`attach` 模式独占。
 6. **上游 storage 工具只写文件、不建目录**：`browser_storage_state` 直接 `open(...,'w')`，而 `<store>/states/`
    首次保存时还不存在，所以 `browser-storage.ts` 在 direct 直连前先 `mkdir(..., { recursive: true })`，
    否则「新账号第一次保存登录态」必然 `ENOENT`（有单测覆盖）。
-7. **文件访问权限的取舍**：MCP storage 工具默认只能读写 Session 工作区，账号目录在工作区外。provider 默认带
-   `--allow-unrestricted-file-access`；换回官方 provider 时插件自动**降级**——在工作区写
+7. **文件访问权限的取舍**：MCP storage 工具默认只能读写 Session 工作区，账号目录在工作区外。provider
+   默认带 `--allow-unrestricted-file-access`；换回官方 provider 时插件自动**降级**——在工作区写
    `.dsh-test-account-storage-<uuid>.json` 临时文件、调完即删，这条路径也有单测覆盖。
-8. **分发用公共 npm**：包名 `@songxiyuan/*`，`publishConfig` 只声明 `access: public`、不再覆盖 registry，
-   所以 `npm publish` 默认落到 `registry.npmjs.org`，目标机器匿名可装（不需要 token / `.npmrc`）。
-   唯一非 peer 依赖 `@playwright/mcp` 也在公共 npm 上，传递依赖能正常解析。发布物完整性由 `check-pack`
-   守（见 §六）。
-9. **DSH profile 的 pnpm 配置是 `nodeLinker: hoisted` + `autoInstallPeers: false`**：① provider 必须在 profile
-   顶层依赖里，所以 `dsh plugin add` 时两个包都要显式给出；② peer 依赖不会自动装，`@deepseek-ai/*` 一律由
-   profile 的 module fallback 提供，不会意外拉到 `0.1.6-alpha` / `0.1.7-alpha`。
+8. **分发用公共 npm**：包名 `@songxiyuan/*`，`publishConfig` 只声明 `access: public`、不覆盖 registry，
+   所以 `npm publish` 默认落到 `registry.npmjs.org`，目标机器匿名可装。发布物完整性由 `check-pack` 守。
+9. **DSH profile 的 pnpm 配置是 `nodeLinker: hoisted` + `autoInstallPeers: false`**：① provider 必须在
+   profile 顶层依赖里，所以 `dsh plugin add` 时两个包都要显式给出；② peer 依赖不会自动装，
+   `@deepseek-ai/*` 一律由 profile 的 module fallback 提供，不会意外拉到 `0.1.6-alpha` / `0.1.7-alpha`。
+10. **账号创建只经过 Agent 工具**：设计文档里的面板「+ 添加」已移除。`account_save` 是唯一的创建入口，
+    它先 upsert 元数据、再用同一 `AccountService` 抓取 storageState 并把 Session 标为当前账号；
+    `accounts/create` 路由端点保留给测试与脚本，但面板不再调用它。
 
 ## 八、范围
 
-已完成：账号 CRUD、保存 / 更新 / 恢复登录态、当前账号展示、Session 隔离、Agent 工具。
+已完成：Agent 驱动的账号登记（`account_save`）、登录态保存 / 更新 / 恢复、当前账号展示、Session 隔离、
+元数据编辑 / 删除、面板。
 
-暂不包含：用户名密码自动登录、OAuth/SSO/验证码、登录态自动续期、Cookie 手工编辑、账号过期自动检测。
+暂不包含：插件自身不接收 / 不保存用户名密码验证码、不做验证码识别、不做 OAuth/SSO、不做登录态自动
+续期、不手工编辑 Cookie、不做过期自动检测。（登录表单由 Agent 用通用浏览器工具填写，是 Agent 行为，
+不是插件能力。）
+
 后续可加：登录态过期探活（`verifyUrl`）、账号分组 / 搜索、导出登录态给 CI 的 `mode: attach` 流程。
 
 ## 九、发布到公共 npm（维护者）
 
-发布的前提是 npm 侧的身份：`@songxiyuan` 这个 scope 只有 npm 用户（或组织）`songxiyuan` 能发。scope
-与 GitHub 仓库 owner 同名只是巧合，公共 npm **不校验**这一点。
+`@songxiyuan` scope 只有 npm 用户 `songxiyuan` 能发；scope 与 GitHub 仓库 owner 同名只是巧合，公共 npm
+**不校验**这一点。
 
 ```bash
-# 0) 一次性：在本机登录并确认身份（2FA 开着的账号走 web 登录最省事）
-npm login                                  # 浏览器授权；无头机器用 npm login --auth-type=legacy + OTP
+# 0) 一次性：登录并确认身份（2FA 账号走 web 登录最省事）
+npm login                                  # 无头机器用 npm login --auth-type=legacy + OTP
 npm whoami                                 # 必须打印 songxiyuan
-npm view @songxiyuan/test-account version  # 已发布则打印版本号，404 说明还没占位
 
 # 1) 本地发布（先跑满 verify，再由 pnpm 逐包 publish）
 pnpm run publish:npm
 ```
 
-**CI 发布**：`.github/workflows/publish.yml` 用仓库 secret `NPM_TOKEN`（npm automation 或 granular
-token，`@songxiyuan` scope 的 read+write）；runner 自带的 `GITHUB_TOKEN` 只用来挂 Release tarball。
-开了 2FA 的账号必须勾 granular token 的 **Bypass 2FA**，否则 CI 也会拿到同一个 403。
+**CI 发布**：`.github/workflows/publish.yml` 用仓库 secret `NPM_TOKEN`（npm granular token，`@songxiyuan`
+scope 的 read+write）；`GITHUB_TOKEN` 只用来挂 Release tarball。开了 2FA 的账号必须勾 granular token 的
+**Bypass 2FA**，否则报 `E403 … bypass 2fa enabled is required`。
 
 ```bash
 git tag v0.1.1 && git push origin v0.1.1   # 或 Actions → publish → Run workflow
 ```
 
-- 不推荐用仓库 secret 的 `NODE_AUTH_TOKEN` 名字以外的写法：workflow 里写的是 `NPM_TOKEN`，改名要同步。
-- **账号开了 2FA 时**：`npm login` 只解决身份，每次 `npm publish` 仍要一个 OTP，否则报
-  `E403 … Two-factor authentication or granular access token with bypass 2fa enabled is required`。
-  本地发用 `pnpm -r --filter './packages/*' publish --otp=<6 位码> --registry https://registry.npmjs.org`
-  （OTP 约 30 秒过期；npm 校验通过后会缓存几分钟，两个包一次命令就能发完），或者按下面用 bypass-2FA 的
-  granular token。
-- 本地 `npm whoami` 通过不等于能发布：`E403` 大多是 2FA（见上一条），不是 token 写错。
+- 本地 `npm whoami` 通过不等于能发布：`E403` 大多是 2FA。发多个包用
+  `pnpm -r --filter './packages/*' publish --otp=<6 位码> --registry https://registry.npmjs.org`。
 - `prepack` 负责构建；`files` 只写目录，绝不列具体文件名（否则发布包缺兄弟模块）。
 - `publishConfig` 只留 `access: public`：**不要**再写 `registry`，否则又会发到别的源。
 - 改 scope 要一起改：两个 `package.json`、`cordis.patch.yml`、`client/index.tsx` 的 `PANEL_ID`、

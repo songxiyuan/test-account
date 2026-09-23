@@ -92,6 +92,48 @@ test('saveState captures the Session browser and records the time', async () => 
   })
 })
 
+test('saveAccount registers an account, captures the browser, and marks it current', async () => {
+  await withService({ sessions: ['session-a'] }, async ({ service, recorder }) => {
+    const view = await service.saveAccount(
+      'session-a',
+      { id: 'VIP-US', name: '  VIP 美国  ', site: 'TeraBox', tags: ['vip', 'vip'] },
+      new AbortController().signal,
+    )
+    assert.equal(view.id, 'vip-us')
+    assert.equal(view.name, 'VIP 美国')
+    assert.deepEqual(view.tags, ['vip'])
+    assert.equal(view.hasState, true)
+    assert.equal(recorder.saved.length, 1)
+    assert.deepEqual(service.current('session-a'), { currentAccountId: 'vip-us' })
+    assert.equal((await service.list()).accounts.length, 1)
+  })
+})
+
+test('saveAccount upserts an existing id without duplicating it', async () => {
+  await withService({ sessions: ['session-a'] }, async ({ service, recorder }) => {
+    await service.saveAccount('session-a', { id: 'vip-us', name: '旧名', site: 'Old' }, new AbortController().signal)
+    const updated = await service.saveAccount('session-a', { id: 'vip-us', name: '新名' }, new AbortController().signal)
+    assert.equal(updated.name, '新名')
+    assert.equal(updated.site, 'Old', 'an omitted optional field is left alone')
+    assert.equal((await service.list()).accounts.length, 1)
+    assert.equal(recorder.saved.length, 2)
+  })
+})
+
+test('saveAccount refuses a Session that is not live before writing metadata', async () => {
+  await withService({ sessions: [] }, async ({ service }) => {
+    await assert.rejects(
+      service.saveAccount('session-gone', { id: 'vip-us', name: 'VIP' }, new AbortController().signal),
+      (error: unknown) => {
+        assert.ok(error instanceof BrowserStorageError)
+        assert.equal(error.code, 'session-not-live')
+        return true
+      },
+    )
+    assert.deepEqual((await service.list()).accounts, [])
+  })
+})
+
 test('use restores the saved bytes and marks the account current', async () => {
   await withService({ sessions: ['session-a'] }, async ({ service, recorder }) => {
     await service.create({ id: 'vip-us', name: 'VIP' })

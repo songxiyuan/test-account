@@ -10,7 +10,9 @@
 - 不把 Playwright 内嵌进账号插件，不另起一套旁路浏览器；浏览器仍是「这个 Session 的浏览器」，
   由自带的 `playwright-mcp-storage` provider 在每个 live Agent 的 scope 里挂载 `@playwright/mcp` 提供，
   账号插件只转发 storage 工具调用。
-- 不保存用户名/密码/验证码，不实现自动登录、OAuth、登录态续期。
+- 不保存用户名/密码/验证码，不实现自动登录、OAuth、登录态续期。登录动作由 Agent 用当前 Session 的通用
+  浏览器工具完成（用户在对话里把网址与凭据发给 Agent），插件只在登录之后抓取 `storageState`；
+  面板不提供「+ 添加」，账号创建的唯一入口是 `account_save` Agent 工具。
 - 不引入数据库；账号元数据是 `accounts.json`，登录态是 Playwright 原生 `storageState` 文件。
 - 不改 DSH 官方包。需要 provider 行为变化时，在本仓库自带一个薄 provider 替换它。
 
@@ -23,7 +25,7 @@ packages/test-account/                         # 账号插件（Host + Client）
     accounts.ts                                # Host：AccountService（路由与 Agent 工具共用）
     account-store.ts                           # accounts.json / states/*.json 的纯文件读写
     browser-storage.ts                         # 调当前 Session 的 MCP storage 工具
-    agent-tools.ts                             # account_list / account_use / account_current
+    agent-tools.ts                             # account_list / account_save / account_use / account_current
     types.ts                                   # 共享类型、路由与端点名
   client/                                      # Client 半：React 面板，esbuild 打成 lib/client.js
   cordis.patch.yml                             # bundle 补丁，声明该插件依赖的运行时组成
@@ -83,6 +85,9 @@ doc/dsh-test-account-plugin-design.md          # 原始设计方案（只读参�
   `--allow-unrestricted-file-access`，同时 `browser-storage.ts` 保留 staged 降级路径（有测试覆盖）。
 - 面板（Fetch 路由）与 Agent 工具必须共用 `AccountService`，不要在 `index.ts` / `agent-tools.ts`
   里重复 id 校验、状态测量、Session 记账或错误码。
+- `account_save` 是账号创建的唯一入口：upsert 元数据 → `bridge.save` 抓 `storageState` → 标记当前账号。
+  登录由 Agent 用通用浏览器工具完成；**不要**给工具加 `username` / `password` 之类的参数，也不要让
+  插件去填表单或解析登录页。
 - Agent 工具用 `exec.agent.id` 定位浏览器，不要新增 `sessionId` 参数，也不要让工具接收任何凭据。
 - `Agent` 的身份字段是 `id`（不是 `sessionId`）。`@deepseek-ai/dsh-tools` 等按需运行时导入由
   profile 的 module fallback 解析，**不要**把它们打进客户端 bundle。

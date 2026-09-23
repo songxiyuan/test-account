@@ -128,6 +128,26 @@ try {
   await page.waitForTimeout(7000)
   await dismissOverlays(page)
 
+  /**
+   * Call one plugin endpoint from inside the page, i.e. over the same
+   * authenticated `/api/test-account` route the panel itself uses.
+   * @param endpoint - endpoint name.
+   * @param payload - endpoint payload.
+   * @returns the decoded Remote envelope.
+   */
+  const call = (endpoint, payload) =>
+    page.evaluate(
+      async ([endpoint, payload]) => {
+        const response = await fetch('/api/test-account', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ endpoint, payload }),
+        })
+        return response.json()
+      },
+      [endpoint, payload],
+    )
+
   await page.getByText('新会话', { exact: true }).first().click({ timeout: 20_000 })
   await page.waitForTimeout(4000)
   const composer = page.locator('textarea, [contenteditable="true"]').first()
@@ -135,6 +155,13 @@ try {
   await page.keyboard.type('smoke test')
   await page.keyboard.press('Enter')
   await page.waitForTimeout(9000)
+
+  // Accounts are created by the Agent's `account_save` tool now, so the smoke
+  // seeds one through the route *before* the panel mounts; the panel only reads
+  // its snapshot on mount.
+  const id = `smoke-${Date.now().toString(36)}`
+  const seeded = await call('accounts/create', { input: { id, name: '冒烟账号' } })
+  check('a create through the route reaches the Host store', seeded.ok === true, JSON.stringify(seeded))
 
   const shortcut = page.getByText('测试账号', { exact: true })
   check('conversation header renders the 测试账号 shortcut', (await shortcut.count()) > 0)
@@ -146,17 +173,10 @@ try {
   const text = await panel.innerText()
   check('panel reports the current account for this Session', text.includes('当前账号：'))
   check('panel reports the account directory', text.includes('账号目录：'))
-  check('panel renders either the empty hint or an account card', (await panel.locator('article').count()) > 0 || text.includes('还没有测试账号'))
+  check('panel offers no manual add button', (await panel.getByRole('button', { name: '+ 添加' }).count()) === 0)
 
-  const id = `smoke-${Date.now().toString(36)}`
-  await page.getByRole('button', { name: '+ 添加' }).first().click()
-  await page.waitForTimeout(600)
-  await page.getByPlaceholder('VIP 美国测试账号').fill('冒烟账号')
-  await page.getByPlaceholder('vip-us').fill(id)
-  await page.getByRole('button', { name: '添加', exact: true }).click()
-  await page.waitForTimeout(3000)
   const card = panel.locator('article').filter({ hasText: id })
-  check('a write through the panel reaches the Host store', (await card.count()) === 1)
+  check('the seeded account is listed in the panel', (await card.count()) === 1)
   check('a state-less account cannot be used yet', await card.getByRole('button', { name: '使用账号' }).isDisabled())
 
   await card.getByRole('button', { name: '删除' }).click()
@@ -172,18 +192,6 @@ try {
     check('found the live Session id', sessionId.startsWith('session-'), sessionId)
     const statePath = join(dshHome, 'test-accounts', 'states', 'smoke-browser.json')
     rmSync(statePath, { force: true })
-    const call = (endpoint, payload) =>
-      page.evaluate(
-        async ([endpoint, payload]) => {
-          const response = await fetch('/api/test-account', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ endpoint, payload }),
-          })
-          return response.json()
-        },
-        [endpoint, payload],
-      )
 
     await call('accounts/delete', { id: 'smoke-browser' })
     const created = await call('accounts/create', { input: { id: 'smoke-browser', name: '浏览器冒烟账号' } })

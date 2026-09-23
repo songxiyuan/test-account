@@ -9,7 +9,7 @@
  */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { AccountStore, AccountStoreError } from './account-store.ts'
+import { AccountStore, AccountStoreError, normalizeId } from './account-store.ts'
 import { BrowserStorageError, type StorageFileAccess } from './browser-storage.ts'
 import type { AccountInput, AccountPatch, AccountsSnapshot, AccountView, TestAccount } from './types.ts'
 
@@ -126,6 +126,37 @@ export class AccountService {
     const account = await this.deps.store.create(input)
     this.deps.log?.info('created account %s', account.id)
     return this.view(account)
+  }
+
+  /**
+   * Register or refresh an account from a Session's live browser.
+   *
+   * This is the Agent-facing entry point behind `account_save`: the Agent logs
+   * in with the ordinary browser tools, then records the result here. Upserts
+   * the metadata, captures the current login state, and marks the account as the
+   * Session's current one.
+   * @param sessionId - Session whose browser to capture.
+   * @param input - account fields; an existing id is updated in place.
+   * @param signal - caller cancellation.
+   * @returns the refreshed account.
+   */
+  async saveAccount(sessionId: string, input: AccountInput, signal: AbortSignal): Promise<AccountView> {
+    const agent = this.requireAgent(sessionId)
+    const id = normalizeId(input.id)
+    const existing = await this.deps.store.get(id)
+    const account =
+      existing === undefined
+        ? await this.deps.store.create({ ...input, id })
+        : await this.deps.store.update(id, {
+            name: input.name,
+            ...(input.site === undefined ? {} : { site: input.site }),
+            ...(input.tags === undefined ? {} : { tags: input.tags }),
+          })
+    await this.deps.bridge.save(agent, this.accessFor(account), signal)
+    const updated = await this.deps.store.touch(account.id)
+    this.currentAccounts.set(sessionId, account.id)
+    this.deps.log?.info('saved account %s from session %s', account.id, sessionId)
+    return this.view(updated)
   }
 
   /**
