@@ -75,6 +75,11 @@ DSH_BIN="dsh" ./install.sh web                              # 用 PATH 上已有
 所以每台机器先做一次认证与 scope 映射：
 
 ```bash
+# 0) 目标 profile 还不存在时先按 web 模板初始化 —— 别跳过这步：
+#    `dsh plugin` 自己建的 profile 只带 `@deepseek-ai/dsh-base`，没有 web app，也就没有面板
+test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
+dsh --profile test-account --from-default-profile web --dump-config >/dev/null
+
 # 1) 一次性配置：classic PAT（只装不发布 → 只要 read:packages；要发布 → 再加 write:packages）
 cat >> ~/.npmrc <<'EOF'
 @songxiyuan:registry=https://npm.pkg.github.com
@@ -111,6 +116,10 @@ GitHub Packages 连 public 包都要求 token，这是它的硬限制。所以�
 ```bash
 V=0.1.0
 BASE="https://github.com/songxiyuan/test-account/releases/download/v$V"
+
+# 目标 profile 不存在时先按 web 模板初始化（`dsh plugin` 自建的 profile 没有 web app）
+test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
+dsh --profile test-account --from-default-profile web --dump-config >/dev/null
 
 dsh plugin --profile test-account add \
   "$BASE/songxiyuan-test-account-$V.tgz" \
@@ -206,6 +215,8 @@ pnpm run smoke:ui "http://127.0.0.1:3081/?token=<token>" -- --home "${DSH_HOME:-
 | profile 里还残留 `@dsh-test-account/*` 旧 scope | 本插件改名前的安装 | 重跑 `./install.sh <profile>`（它会先 `dsh plugin remove` 旧 scope 的两个包）；或手工 `dsh plugin --profile <p> remove @dsh-test-account/test-account @dsh-test-account/playwright-mcp-storage` |
 | `ERR_PNPM_FETCH_401` / `404 Not Found - GET https://npm.pkg.github.com/@songxiyuan%2f…` | 目标机器没配 GitHub Packages 的 token 或 scope 映射（**public 包也不允许匿名装**） | 按 §0.2B 第 1 步写 `~/.npmrc`：`@songxiyuan:registry=https://npm.pkg.github.com` + `//npm.pkg.github.com/:_authToken=<classic PAT>`（勾 `read:packages`） |
 | 在公开 npm 上找不到 `@songxiyuan/…`（404） | 包只发在 GitHub Packages，没发 npmjs | 用 §0.2B 的安装命令；不要用 `npm view` 去 npmjs 验证，改用 `npm view @songxiyuan/test-account --registry https://npm.pkg.github.com` |
+| 包装上了，但右侧栏/对话头里根本没有「测试账号」 | profile 是被 `dsh plugin` 顺手建出来的，`dsh.profile.bundles` 里只有 `@deepseek-ai/dsh-base`，没有 web app | 用 `web` 模板重建该 profile，或换一个已有 web profile：`dsh --profile <new> --from-default-profile web --dump-config >/dev/null` 然后重新 add（见 §0.2B 第 0 步） |
+| `pnpm add` 拉 Release tarball 时超时 / `HEAD https://github.com/…` 失败 | 目标机器到 github.com 的网络不稳定（release 资产会 302 到 `objects.githubusercontent.com`） | 重试；或先把两个 `.tgz` 下载下来再 `dsh plugin add ./xxx.tgz`（等价，装的是同一份产物） |
 | 装依赖时拉到 `0.1.6-alpha` / `0.1.7-alpha` 包 | npm 缓存或旧 lockfile 残留 | 删掉 `node_modules` 与 `pnpm-lock.yaml` 重新 `pnpm install`；本仓库全部锁在 `0.1.5-rc.3` + `cordis 4.0.2` |
 | `Browser "chrome-for-testing" is not installed` | provider 没探测到本机浏览器 | ① 装本机 Chrome / Chromium / Edge（`autoExecutablePath` 默认复用）；或 ② `npx @playwright/mcp install-browser chrome-for-testing`；或 ③ 在 profile 配 `provider.executablePath` |
 | `File access denied ... outside allowed roots` | provider 缺 `--allow-unrestricted-file-access` | 用本仓库的 storage provider；插件会降级 staged，但默认 provider 更稳 |
@@ -543,6 +554,8 @@ pnpm run publish:gh    # 维护者发版：verify + 发布到 GitHub Packages（
 | 集成 | 上面这套在三种装法下都跑过：`install.sh` 新建的 profile、已初始化过的 profile、以及不配 `executablePath`（靠自动探测本机 Chrome） | ✅ |
 | 集成 | scope 改名 `@dsh-test-account/*` → `@songxiyuan/*` 后：`install.sh` 自动迁移旧 profile 依赖，`pnpm run verify` 全绿（37 项单测 + bundle id `@songxiyuan/test-account`），面板冒烟通过 | ✅ 9/9 |
 | 集成 | 发布物完整性：两个包 `npm pack` 出来的 tarball 含全部 `lib/*.js`（16 / 8 个文件），`scripts/check-pack.mjs` 在旧的逐文件名 `files` 配置下会红并逐条列出缺失的兄弟模块 | ✅ |
+| 集成 | `.github/workflows/publish.yml` 在 `v0.1.0` tag 上全绿：install → verify → publish to GitHub Packages → 两个 `.tgz` 挂上 Release（run `35871964082`，10 个步骤全部 success）；两个资产可匿名下载（29.7 KB / 9.0 KB），内容与本地 pack 一致 | ✅ |
+| 集成 | 「新机器」零凭据路线：全新 `DSH_HOME` + `web` 模板 profile → 从 Release URL 装两个包（exit 0）→ profile 依赖与 `dsh.profile.bundles` 正确 → 启动后 boot manifest 含 `{"id":"@songxiyuan/test-account","url":"/plugins/??@songxiyuan/test-account/client.js…"}`，该 URL 返回 200（26 KB，`id: "@songxiyuan/test-account"`） | ✅ |
 | 手工 | 图形浏览器里「登录 → 保存登录态 → 换账号 → 恢复」；以及设计文档 §14 的风险项：两个 Session 同时各起一个浏览器、各自切账号互不干扰 | ⏳ 需要人手动登录；浏览器资源是 provider 的职责，不该在本插件里绕过 |
 
 `scripts/smoke-ui.mjs` 需要一个已经跑起来的实例：
