@@ -119,21 +119,22 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
   `0.1.5-rc.3`），并在装包前移除 profile 里残留的 0.1.7 browser-use 栈
   （`@deepseek-ai/dsh-browser-use` / `@deepseek-ai/dsh-experimental-browser-use-runtime` / 旧 provider）
   与改名前的 `@dsh-test-account/*` 两个包。
-- **路线 B（没有源码的机器）**：从 GitHub Packages 装 `@songxiyuan/*`。scope 必须等于仓库 owner
-  （GitHub Packages 的硬性要求）；registry 是 `https://npm.pkg.github.com`，**对 public 包也要求
-  classic PAT**（不支持 fine-grained token），所以目标机器先写 `~/.npmrc`：
+- **路线 B（没有源码的机器）**：从公共 npm（`https://registry.npmjs.org`）装 `@songxiyuan/*`，**匿名可装、
+  不需要 token 或 `.npmrc` 映射**。scope 是 npm 侧的事实：只有 npm 用户 `songxiyuan` 能发这两个名字，
+  与仓库 owner 同名只是巧合。安装/升级都是普通 registry 名字：
 
   ```bash
-  @songxiyuan:registry=https://npm.pkg.github.com
-  //npm.pkg.github.com/:_authToken=<classic PAT, read:packages>
+  dsh plugin --profile <p> add @songxiyuan/test-account @songxiyuan/playwright-mcp-storage
+  dsh plugin --profile <p> update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage  # + 重启该 profile
   ```
 
-  然后 `dsh plugin --profile <p> add @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`
-  （两个包都要显式给出：`cordis.patch.yml` 按包名解析 provider），升级用
-  `dsh plugin --profile <p> update` + 重启该 profile 的 DSH 进程。
-- 发布：CI（`publish.yml`，`GITHUB_TOKEN`）或本地 `pnpm run publish:gh`（需要 classic PAT）。
-  `publishConfig.registry` 已经指向 GitHub Packages；发布前必须 `pnpm run check:pack` 全绿。
-  **不要把 PAT 写进仓库任何文件**，只写目标机器的 `~/.npmrc`（CI 用 secret / `GITHUB_TOKEN`）。
+  两个包都要显式给出（`cordis.patch.yml` 按包名解析 provider）。0.1.0 曾只发在 GitHub Packages：
+  旧 profile 的 lockfile 指向 `npm.pkg.github.com` 时，按根 README §1.3 的迁移步骤强制重解析到 0.1.1，
+  并删掉 `~/.npmrc` 里旧的 `@songxiyuan:registry=…` 映射。
+- 发布：CI（`publish.yml`，用仓库 secret `NPM_TOKEN`）或本地 `pnpm run publish:npm`。两个包的
+  `publishConfig` **只留 `access: public`、不写 `registry`**（写回 GitHub Packages 会重新变成需要 token
+  的一条路线）；发布前必须 `pnpm run check:pack` 全绿。**不要把 npm token 写进仓库任何文件**，
+  只写 CI secret 或目标机器的 `~/.npmrc`。
 - 根 README 的「一、安装」是给人和 AI Agent 共用的自包含安装规程（两条路线、前置检查、逐条命令、
   安装后自检、故障→处理、硬性约束、机器可读摘要）。改动安装入口、包清单、版本线或自检方式时，
   必须同步更新该节，保持命令可直接复制执行。

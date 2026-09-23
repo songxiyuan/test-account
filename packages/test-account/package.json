@@ -1,6 +1,6 @@
 {
   "name": "@songxiyuan/test-account",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH 测试账号登录态管理：账号元数据注册表 + 右侧栏面板 + 当前 Session 的 Playwright storageState 桥",
   "repository": {
     "type": "git",
@@ -39,7 +39,6 @@
     "cordis.patch.yml"
   ],
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
     "access": "public"
   },
   "scripts": {

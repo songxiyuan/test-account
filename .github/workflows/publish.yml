@@ -1,14 +1,14 @@
-# Publish the two packages to GitHub Packages (+ attach tarballs to the Release).
+# Publish the two packages to the public npm registry (+ attach tarballs to the Release).
 #
-# Everything here uses the runner's own GITHUB_TOKEN, so publishing needs no
-# personal access token from anyone: `packages: write` for the registry,
-# `contents: write` for the Release assets.
+# Publishing needs the repo secret `NPM_TOKEN` (an npm automation / granular
+# access token with read+write on the `@songxiyuan` scope). The runner's own
+# GITHUB_TOKEN is only used for the Release assets (`contents: write`).
 #
-#   git tag v0.1.0 && git push origin v0.1.0     # tag → publish + release assets
-#   Actions → publish → Run workflow             # same, against the current commit
+#   git tag v0.1.1 && git push origin v0.1.1     # tag → publish + release assets
+#   Actions → publish → Run workflow            # same, against the current commit
 #
-# The scope in the package names must equal the repository owner (GitHub
-# Packages requirement) — see packages/*/package.json.
+# The scope is an npm-side fact: only the npm user/org owning `@songxiyuan` can
+# publish these names. It is no longer tied to the repository owner.
 name: publish
 
 on:
@@ -19,7 +19,6 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   publish:
@@ -36,9 +35,8 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      # No scope mapping yet on purpose: the default registry stays npmjs.org so
-      # `@deepseek-ai/*` resolves normally. The workspace itself never depends on
-      # `@songxiyuan/*`.
+      # The default registry stays npmjs.org, so both the build-time
+      # `@deepseek-ai/*` dependencies and the published packages resolve there.
       - name: install
         run: pnpm install --frozen-lockfile
 
@@ -46,15 +44,14 @@ jobs:
       - name: verify
         run: pnpm run verify
 
-      - name: publish to GitHub Packages
+      - name: publish to the public npm registry
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           {
-            printf '@songxiyuan:registry=https://npm.pkg.github.com\n'
-            printf '//npm.pkg.github.com/:_authToken=%s\n' "$NODE_AUTH_TOKEN"
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN"
           } >> .npmrc
-          pnpm -r --filter './packages/*' publish --no-git-checks
+          pnpm -r --filter './packages/*' publish --no-git-checks --registry https://registry.npmjs.org
 
       # `npm pack` runs each package's prepack, so the tarballs carry a fresh lib/.
       - name: pack release tarballs
@@ -63,7 +60,7 @@ jobs:
           (cd packages/test-account && npm pack --pack-destination "$GITHUB_WORKSPACE/dist")
           (cd packages/playwright-mcp-storage && npm pack --pack-destination "$GITHUB_WORKSPACE/dist")
 
-      # Tag runs get a Release whose assets install with no token at all.
+      # Tag runs get a Release whose assets install with no registry auth at all.
       - name: attach tarballs to the Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -71,7 +68,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/*.tgz \
             --title "$GITHUB_REF_NAME" \
-            --notes "DSH 测试账号插件 ${GITHUB_REF_NAME}：GitHub Packages 的镜像 tarball，供没有 token 的机器安装。" \
+            --notes "DSH 测试账号插件 ${GITHUB_REF_NAME}：公共 npm 上的镜像 tarball。" \
           || gh release upload "$GITHUB_REF_NAME" dist/*.tgz --clobber
 
       - name: keep the tarballs as a workflow artifact

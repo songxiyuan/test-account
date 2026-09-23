@@ -26,7 +26,7 @@ mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
 | 机器 | 路线 |
 | --- | --- |
 | 有本仓库 checkout | **A** 本地源码：[`./install.sh <profile>`](#12-路线-a本地源码) |
-| 只有 DSH、没有源码 | **B** GitHub Packages：[`dsh plugin … add @songxiyuan/…`](#13-路线-bgithub-packages) |
+| 只有 DSH、没有源码 | **B** 公共 npm：[`dsh plugin … add @songxiyuan/…`](#13-路线-b公共-npm) |
 
 > **给 AI Agent**：以下步骤自包含，命令都在**仓库根目录**执行；逐条检查退出码，非 0 就停下查
 > [§1.6](#16-故障--处理)；不要改 DSH 官方包、不要动别人正在用的 profile / GUI 进程、不要写 `postinstall`。
@@ -40,7 +40,7 @@ mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
 | pnpm | `pnpm -v` | 有版本号（本项目 `pnpm@11.9.0`） |
 | 网络 | `npm ping` | `PONG`（要能拉 npm 上的 `@deepseek-ai/*`） |
 | 浏览器（可选） | macOS `ls "/Applications/Google Chrome.app"` | 有 Chrome / Chromium / Edge 则登录态功能开箱即用 |
-| 路线 B 额外 | `npm config get //npm.pkg.github.com/:_authToken` | 有值（classic PAT） |
+| 路线 B 额外 | `npm config get registry` | `https://registry.npmjs.org/`（公共 npm 安装**不需要任何 token**） |
 
 ### 1.2 路线 A：本地源码
 
@@ -58,9 +58,9 @@ browser-use 栈与 `@dsh-test-account/*` 旧 scope）；④ 靠 `dsh.bundle.patc
 > 初始化必须先判断目录是否存在：`--from-default-profile` 对 `web` / `acp` / `headless` / `sdk` 这类内置
 > 模板名，连已存在的 profile 也会拒绝。
 
-### 1.3 路线 B：GitHub Packages
+### 1.3 路线 B：公共 npm
 
-两个包只发在 GitHub Packages（scope `@songxiyuan`），**公开 npm 上没有**，而且它对 public 包也要求认证。
+两个包都发在公共 npm（scope `@songxiyuan`），**装的时候不需要 token、不需要 `.npmrc`**：
 
 ```bash
 # 0) profile 不存在时先按 web 模板初始化 —— 别跳过：
@@ -68,20 +68,31 @@ browser-use 栈与 `@dsh-test-account/*` 旧 scope）；④ 靠 `dsh.bundle.patc
 test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
 dsh --profile test-account --from-default-profile web --dump-config >/dev/null
 
-# 1) 一次性认证：classic PAT（只装 → read:packages；要发布 → 再加 write:packages）
-cat >> ~/.npmrc <<'EOF'
-@songxiyuan:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=<你的 classic PAT>
-EOF
-
-# 2) 装进目标 profile（两个包都要显式给出：cordis.patch.yml 按包名解析 provider）
+# 1) 装进目标 profile（两个包都要显式给出：cordis.patch.yml 按包名解析 provider）
 dsh plugin --profile test-account add \
   @songxiyuan/test-account \
   @songxiyuan/playwright-mcp-storage
 ```
 
-升级：`dsh plugin --profile test-account update`，然后重启该 profile 的 DSH 进程。token 必须是 **classic
-PAT**（GitHub Packages 不接受 fine-grained token）。
+升级：`dsh plugin --profile test-account update`，然后重启该 profile 的 DSH 进程。
+
+```bash
+# 把最新版本拉进 profile 的 package.json / lockfile（不改 profile 的 profile/bundles 结构）
+dsh plugin --profile test-account update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage
+```
+
+| 场景 | 命令 |
+| --- | --- |
+| 首次安装 | 上面两条（初始化 + `add`） |
+| 日常升级到已发布的最新版 | `dsh plugin --profile <p> update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`（或整表 `update`），再重启该 profile |
+| 装指定版本 | `dsh plugin --profile <p> add @songxiyuan/test-account@0.1.1 @songxiyuan/playwright-mcp-storage@0.1.1` |
+
+> **从 GitHub Packages 迁过来**：0.1.0 只在 GitHub Packages 上，profile 的 lockfile 里记的是
+> `npm.pkg.github.com`。公共 npm 的 0.1.1 与它同 scope 同名，直接 `update` 到 `^0.1.0` 范围外即可换源；
+> 若 lockfile 仍指向 `npm.pkg.github.com`（报 `401` / `404`），在 profile 目录里强制重解析：
+> `dsh plugin --profile <p> add @songxiyuan/test-account@0.1.1 @songxiyuan/playwright-mcp-storage@0.1.1`。
+> 装完把 `~/.npmrc` 里为 GitHub Packages 加的 `@songxiyuan:registry=…` 与
+> `//npm.pkg.github.com/:_authToken=…` 两行删掉，避免以后又走回旧源。
 
 ### 1.4 安装后自检（必须全绿再继续）
 
@@ -135,7 +146,8 @@ dsh --profile test-account --port 3081
 | `npm error ENOENT ... _npx/<hash>/package.json` | npx 缓存损坏：`rm -rf ~/.npm/_npx` 后重跑，或 `DSH_BIN=dsh ./install.sh test-account` |
 | `profile "web" is shipped and cannot be a custom profile target` | 对**已存在**的 profile 跑了 `--from-default-profile`；删掉初始化那一步（`install.sh` 会自动判断） |
 | `error: web takes none of parent --profile …` | 0.1.5 的 `web` 子命令写死 `--profile web`；改跑 `dsh --profile <name> --port 3081` |
-| `ERR_PNPM_FETCH_401` / `404 … npm.pkg.github.com` | 目标机器没配 `~/.npmrc`（public 包也不允许匿名装），见 [§1.3](#13-路线-bgithub-packages) |
+| `ERR_PNPM_FETCH_401` / `404 … npm.pkg.github.com` | profile 的 lockfile 还停在旧的 GitHub Packages 源；按 [§1.3](#13-路线-b公共-npm) 的迁移步骤强制重解析到公共 npm |
+| `ERR_PNPM_FETCH_401 … registry.npmjs.org` | 公共 npm 的公开包匿名可装；报 401 说明 `~/.npmrc` 里有失效的 `_authToken`/scope 映射，临时用 `npm_config_userconfig=/dev/null` 复跑定位 |
 | 装上了，但右侧栏/对话头没有「测试账号」 | profile 是 `dsh plugin` 顺手建的、没有 web app；或 Session 还没有 turn；或装进运行中的 profile 后没重启 |
 | `Browser "chrome-for-testing" is not installed` | 装本机 Chrome / Chromium / Edge；或 `npx @playwright/mcp install-browser chrome-for-testing`；或配 `provider.executablePath` |
 | `File access denied ... outside allowed roots` | 用本仓库的 storage provider（默认带 `--allow-unrestricted-file-access`） |
@@ -143,8 +155,8 @@ dsh --profile test-account --port 3081
 | 装依赖拉到 `0.1.6-alpha` / `0.1.7-alpha` | npm 缓存或旧 lockfile 残留：删掉 `node_modules` 与 `pnpm-lock.yaml` 重装 |
 
 **硬性约束**：不装 / 不升 `@playwright/mcp`（固定 `0.0.80`），`@deepseek-ai/*` 不用 `latest`（锁
-`0.1.5-rc.3` + cordis `4.0.2`）；不改 DSH 官方包；不动别人正在用的 profile / GUI；不把 PAT 写进仓库文件；
-不写 `postinstall` 改用户 profile；不采集用户名 / 密码 / 验证码。
+`0.1.5-rc.3` + cordis `4.0.2`）；不改 DSH 官方包；不动别人正在用的 profile / GUI；不把 npm token 写进
+仓库文件；不写 `postinstall` 改用户 profile；不采集用户名 / 密码 / 验证码。
 
 ### 1.7 机器可读摘要
 
@@ -157,11 +169,11 @@ pnpm_version: 11.9.0
 node_min: "22.18"
 local_entry: "./install.sh <profile>"
 registry_entry:
-  registry: "https://npm.pkg.github.com"
+  registry: "https://registry.npmjs.org"
   scope: "@songxiyuan"
-  auth: "~/.npmrc: @songxiyuan:registry=… + //npm.pkg.github.com/:_authToken=<classic PAT>"
+  auth: "none (public packages)"
   add: "dsh plugin --profile <p> add @songxiyuan/test-account @songxiyuan/playwright-mcp-storage"
-  update: "dsh plugin --profile <p> update  # 然后重启该 profile"
+  update: "dsh plugin --profile <p> update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage  # 然后重启该 profile"
 local_packages: [packages/test-account, packages/playwright-mcp-storage]
 profile_checks: { dependencies_present: 2, bundles_contains: "@songxiyuan/test-account" }
 start: "dsh --profile test-account --port 3081"
@@ -266,7 +278,7 @@ pnpm run build         # tsc 出 host 半 + esbuild 出 lib/client.js
 pnpm run test          # node:test 单元测试（store + provider 参数 + 浏览器桥降级）
 pnpm run verify        # 以上全跑，并做 client bundle 结构检查 + 发布包完整性检查
 pnpm run check:pack    # 只跑发布包完整性：npm pack 清单 vs lib/*.js 的相对导入
-pnpm run publish:gh    # 维护者发版：verify + 发布到 GitHub Packages
+pnpm run publish:npm   # 维护者发版：verify + 发布到公共 npm（registry.npmjs.org）
 ```
 
 `lib/` 是构建产物（已在 `.gitignore`），不要提交。`pnpm run verify` 里两项检查值得知道：
@@ -320,8 +332,10 @@ pnpm run smoke:ui "http://127.0.0.1:3081/?token=..." -- --home ~/.dsh       # �
 7. **文件访问权限的取舍**：MCP storage 工具默认只能读写 Session 工作区，账号目录在工作区外。provider 默认带
    `--allow-unrestricted-file-access`；换回官方 provider 时插件自动**降级**——在工作区写
    `.dsh-test-account-storage-<uuid>.json` 临时文件、调完即删，这条路径也有单测覆盖。
-8. **分发用 GitHub Packages**：包名必须与仓库 owner 同 scope，所以是 `@songxiyuan/*`；GitHub Packages 对
-   public 包也要求 classic PAT。发布物完整性由 `check-pack` 守（见 §六）。
+8. **分发用公共 npm**：包名 `@songxiyuan/*`，`publishConfig` 只声明 `access: public`、不再覆盖 registry，
+   所以 `npm publish` 默认落到 `registry.npmjs.org`，目标机器匿名可装（不需要 token / `.npmrc`）。
+   唯一非 peer 依赖 `@playwright/mcp` 也在公共 npm 上，传递依赖能正常解析。发布物完整性由 `check-pack`
+   守（见 §六）。
 9. **DSH profile 的 pnpm 配置是 `nodeLinker: hoisted` + `autoInstallPeers: false`**：① provider 必须在 profile
    顶层依赖里，所以 `dsh plugin add` 时两个包都要显式给出；② peer 依赖不会自动装，`@deepseek-ai/*` 一律由
    profile 的 module fallback 提供，不会意外拉到 `0.1.6-alpha` / `0.1.7-alpha`。
@@ -333,28 +347,35 @@ pnpm run smoke:ui "http://127.0.0.1:3081/?token=..." -- --home ~/.dsh       # �
 暂不包含：用户名密码自动登录、OAuth/SSO/验证码、登录态自动续期、Cookie 手工编辑、账号过期自动检测。
 后续可加：登录态过期探活（`verifyUrl`）、账号分组 / 搜索、导出登录态给 CI 的 `mode: attach` 流程。
 
-## 九、发布到 GitHub Packages（维护者）
+## 九、发布到公共 npm（维护者）
 
-**CI 发布（推荐，不需要本地 token）**：`.github/workflows/publish.yml` 用 runner 自带的 `GITHUB_TOKEN`
-（`packages: write` + `contents: write`）跑 `install → verify → pnpm -r publish`。
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0   # 或 Actions → publish → Run workflow
-```
-
-**本地发布**（需要 classic PAT，`write:packages`）：
+发布的前提是 npm 侧的身份：`@songxiyuan` 这个 scope 只有 npm 用户（或组织）`songxiyuan` 能发。scope
+与 GitHub 仓库 owner 同名只是巧合，公共 npm **不校验**这一点。
 
 ```bash
-npm login --scope=@songxiyuan --auth-type=legacy --registry=https://npm.pkg.github.com
-pnpm run publish:gh     # = verify && pnpm -r --filter './packages/*' publish
-npm whoami --registry https://npm.pkg.github.com      # 应打印 songxiyuan
+# 0) 一次性：在本机登录并确认身份（2FA 开着的账号走 web 登录最省事）
+npm login                                  # 浏览器授权；无头机器用 npm login --auth-type=legacy + OTP
+npm whoami                                 # 必须打印 songxiyuan
+npm view @songxiyuan/test-account version  # 已发布则打印版本号，404 说明还没占位
+
+# 1) 本地发布（先跑满 verify，再由 pnpm 逐包 publish）
+pnpm run publish:npm
 ```
 
+**CI 发布**：`.github/workflows/publish.yml` 用仓库 secret `NPM_TOKEN`（npm automation 或 granular
+token，`@songxiyuan` scope 的 read+write）；runner 自带的 `GITHUB_TOKEN` 只用来挂 Release tarball。
+
+```bash
+git tag v0.1.1 && git push origin v0.1.1   # 或 Actions → publish → Run workflow
+```
+
+- 不推荐用仓库 secret 的 `NODE_AUTH_TOKEN` 名字以外的写法：workflow 里写的是 `NPM_TOKEN`，改名要同步。
+- 开启账号 2FA 时，本地 `npm publish` 会要 OTP；`--auth-type=legacy` 只在需要老式 token 时用。
 - `prepack` 负责构建；`files` 只写目录，绝不列具体文件名（否则发布包缺兄弟模块）。
-- 首次发布的可见性是 private，需要在仓库 Packages 里改成 public（或给机器授权）。
+- `publishConfig` 只留 `access: public`：**不要**再写 `registry`，否则又会发到别的源。
 - 改 scope 要一起改：两个 `package.json`、`cordis.patch.yml`、`client/index.tsx` 的 `PANEL_ID`、
   `scripts/build-client.mjs` 写入的 bundle id（= 包名，必须重新 `build`）、文档与 `install.sh`。
-- 版本号一旦发布就永久占位，撤回要删包版本后发更高的号。
+- 版本号一旦发布就永久占位，撤回要 `npm unpublish` 后发更高的号（已发布版本 24h 后不可 unpublish）。
 
 ## 参考
 

@@ -21,18 +21,17 @@ DSH profile，否则面板、路由和浏览器工具都不完整。
 ./install.sh test-account        # 默认 profile；详见根 README「一、安装」
 ```
 
-没有源码的机器，从 GitHub Packages 装（公开 npm 上没有这个包）：
+没有源码的机器，从公共 npm 装（公开包，不需要 token / `.npmrc`）：
 
 ```bash
-# 一次性：~/.npmrc 里写 scope 映射 + classic PAT（read:packages）
-#   @songxiyuan:registry=https://npm.pkg.github.com
-#   //npm.pkg.github.com/:_authToken=<classic PAT>
 dsh plugin --profile test-account add \
   @songxiyuan/test-account \
   @songxiyuan/playwright-mcp-storage
 ```
 
-GitHub Packages 对 public 包也要求认证，所以没配 token 的机器会拿到 `401` / `404`；细节见根 README §1.3。
+升级：`dsh plugin --profile test-account update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`，
+然后重启该 profile。0.1.0 曾只发在 GitHub Packages，从那个源迁过来的 profile 要按根 README §1.3 强制
+重解析到 0.1.1，并清掉 `~/.npmrc` 里旧的 `@songxiyuan:registry=…` 映射。
 
 安装后 profile 的 `dsh.profile.bundles` 会自动包含 `@songxiyuan/test-account`（来自本包的
 `cordis.patch.yml`），无需手工改 `cordis.yml`。

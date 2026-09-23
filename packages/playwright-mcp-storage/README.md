@@ -35,16 +35,16 @@
 ./install.sh test-account        # 默认 profile；详见根 README「一、安装」
 ```
 
-没有源码的机器从 GitHub Packages 装（本包在公开 npm 上不存在，且 GitHub Packages 对 public 包也要认证）：
+没有源码的机器从公共 npm 装（`@playwright/mcp` 也在公共 npm 上，传递依赖自动解析；不需要 token）：
 
 ```bash
-# 一次性：~/.npmrc 里写 scope 映射 + classic PAT（read:packages）
-#   @songxiyuan:registry=https://npm.pkg.github.com
-#   //npm.pkg.github.com/:_authToken=<classic PAT>
 dsh plugin --profile test-account add \
   @songxiyuan/test-account \
   @songxiyuan/playwright-mcp-storage
 ```
+
+升级用 `dsh plugin --profile test-account update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`
+后重启该 profile。
 
 `cordis.patch.yml` 按包名解析本 provider，所以 profile 的顶层依赖里必须有它；细节见根 README §1.3。
 
