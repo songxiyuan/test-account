@@ -1,6 +1,6 @@
 {
   "name": "@songxiyuan/test-account",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH 测试账号登录态管理：账号元数据注册表 + 右侧栏面板 + 当前 Session 的 Playwright storageState 桥",
   "repository": {
     "type": "git",
@@ -46,6 +46,9 @@
     "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@songxiyuan/playwright-mcp-storage": "workspace:^0.1.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

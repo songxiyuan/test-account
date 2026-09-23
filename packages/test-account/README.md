@@ -26,17 +26,16 @@ dsh plugin --profile test-account add ./packages/test-account ./packages/playwri
 本地装的是 `link:`，运行时直读仓库里的 `lib/`；profile 不存在时还要先按 `web` 模板初始化，
 完整的三条命令见根 README §1.2。
 
-没有源码的机器，从公共 npm 装（公开包，不需要 token / `.npmrc`）：
+没有源码的机器，从公共 npm 装（公开包，不需要 token / `.npmrc`）。本包把 provider
+`@songxiyuan/playwright-mcp-storage` 声明成了自己的依赖（**伞包，0.1.2 起**），所以只报本包：
 
 ```bash
-dsh plugin --profile test-account add \
-  @songxiyuan/test-account \
-  @songxiyuan/playwright-mcp-storage
+dsh plugin --profile test-account add @songxiyuan/test-account
 ```
 
-升级：`dsh plugin --profile test-account update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`，
-然后重启该 profile。0.1.0 曾只发在 GitHub Packages，从那个源迁过来的 profile 要按根 README §1.3 强制
-重解析到 0.1.1，并清掉 `~/.npmrc` 里旧的 `@songxiyuan:registry=…` 映射。
+升级：`dsh plugin --profile test-account update @songxiyuan/test-account`，然后重启该 profile。
+0.1.1 及更早没有这条依赖边，必须两个包名都写。0.1.0 曾只发在 GitHub Packages，从那个源迁过来的
+profile 要按根 README §1.3 强制重解析到 0.1.2，并清掉 `~/.npmrc` 里旧的 `@songxiyuan:registry=…` 映射。
 
 安装后 profile 的 `dsh.profile.bundles` 会自动包含 `@songxiyuan/test-account`（来自本包的
 `cordis.patch.yml`），无需手工改 `cordis.yml`。

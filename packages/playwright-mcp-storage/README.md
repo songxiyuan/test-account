@@ -28,12 +28,13 @@
 
 ## 安装
 
-不要单独装本包：它必须和 `@songxiyuan/test-account` 一起进同一个 profile。有源码的开发机在仓库根按
-根 README §1.2 装：
+本包是 `@songxiyuan/test-account` 的依赖（**伞包，0.1.2 起**），装主包时会被自动装上，所以通常
+**不需要单独装本包**：单独装它只会得到一个不会被挂载的普通依赖（它没有 `dsh.bundle`，不贡献补丁层）。
+有源码的开发机在仓库根按根 README §1.2 装：
 
 ```bash
 pnpm install && pnpm run build
-dsh plugin --profile test-account add ./packages/test-account ./packages/playwright-mcp-storage
+dsh plugin --profile test-account add ./packages/test-account
 ```
 
 本地装的是 `link:`，`lib/` 必须先 build 出来（完整命令见根 README §1.2）。
@@ -41,15 +42,15 @@ dsh plugin --profile test-account add ./packages/test-account ./packages/playwri
 没有源码的机器从公共 npm 装（`@playwright/mcp` 也在公共 npm 上，传递依赖自动解析；不需要 token）：
 
 ```bash
-dsh plugin --profile test-account add \
-  @songxiyuan/test-account \
-  @songxiyuan/playwright-mcp-storage
+dsh plugin --profile test-account add @songxiyuan/test-account
 ```
 
-升级用 `dsh plugin --profile test-account update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`
-后重启该 profile。
+升级用 `dsh plugin --profile test-account update @songxiyuan/test-account` 后重启该 profile。
+0.1.1 及更早没有这条依赖边，那时必须把两个包名都写。
 
-`cordis.patch.yml` 按包名解析本 provider，所以 profile 的顶层依赖里必须有它；细节见根 README §1.3。
+`cordis.patch.yml` 按包名解析本 provider，走的就是主包声明的那条依赖边：DSH 启动时按
+「安装目录 → 各 bundle 根」展开依赖图，bundle 根锚在包的真实目录上，因此 provider 即使在
+pnpm 的嵌套 `node_modules` 里也能被找到；细节见根 README §1.3。
 
 ## 参数拼装
 

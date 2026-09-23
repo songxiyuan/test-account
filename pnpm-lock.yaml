@@ -44,6 +44,10 @@ importers:
         version: 3.18.2
 
   packages/test-account:
+    dependencies:
+      '@songxiyuan/playwright-mcp-storage':
+        specifier: workspace:^0.1.2
+        version: link:../playwright-mcp-storage
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.2

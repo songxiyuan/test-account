@@ -1,6 +1,6 @@
 {
   "name": "@songxiyuan/playwright-mcp-storage",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Playwright MCP browser provider with the upstream storage capability enabled, mounted once per live Session through @deepseek-ai/dsh-mcp-client",
   "repository": {
     "type": "git",

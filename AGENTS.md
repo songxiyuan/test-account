@@ -126,8 +126,11 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
   pnpm install && pnpm run build
   test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
   dsh --profile test-account --from-default-profile web --dump-config >/dev/null
-  dsh plugin --profile test-account add ./packages/test-account ./packages/playwright-mcp-storage
+  dsh plugin --profile test-account add ./packages/test-account
   ```
+
+  只报主包：`packages/test-account` 的 `dependencies` 里声明了 provider（**伞包**），第 3 条写一个目录就够，
+  `cordis.patch.yml` 里那行 provider 按包名走这条依赖边解析。
 
   第 1 条不能省：`dsh plugin add <本地目录>` 在 profile 里写的是 `link:`（`node_modules` 直接软链回
   仓库），运行时读的 `lib/` 是 gitignore 的构建产物；`link:` 不触发 `build` / `prepack`，所以漏掉 build
@@ -143,13 +146,16 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
   与仓库 owner 同名只是巧合。安装/升级都是普通 registry 名字：
 
   ```bash
-  dsh plugin --profile <p> add @songxiyuan/test-account @songxiyuan/playwright-mcp-storage
-  dsh plugin --profile <p> update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage  # + 重启该 profile
+  dsh plugin --profile <p> add @songxiyuan/test-account
+  dsh plugin --profile <p> update @songxiyuan/test-account  # + 重启该 profile
   ```
 
-  两个包都要显式给出（`cordis.patch.yml` 按包名解析 provider）。0.1.0 曾只发在 GitHub Packages：
-  旧 profile 的 lockfile 指向 `npm.pkg.github.com` 时，按根 README §1.3 的迁移步骤强制重解析到 0.1.1，
-  并删掉 `~/.npmrc` 里旧的 `@songxiyuan:registry=…` 映射。
+  **伞包（0.1.2 起）**：主包的 `dependencies` 声明了 provider，只报主包一个名字，pnpm 会自动补上
+  `@songxiyuan/playwright-mcp-storage`（provider 没有 `dsh.bundle`，是普通依赖、不贡献层，靠主包的
+  patch 行按包名解析）。0.1.1 及更早没有这条依赖边，必须两个包名都写，否则启动报
+  `ERR_MODULE_NOT_FOUND: Cannot find package '@songxiyuan/playwright-mcp-storage'`。
+  0.1.0 曾只发在 GitHub Packages：旧 profile 的 lockfile 指向 `npm.pkg.github.com` 时，按根 README §1.3
+  的迁移步骤强制重解析到 0.1.2，并删掉 `~/.npmrc` 里旧的 `@songxiyuan:registry=…` 映射。
 - 发布：CI（`publish.yml`，用仓库 secret `NPM_TOKEN`）或本地 `pnpm run publish:npm`。两个包的
   `publishConfig` **只留 `access: public`、不写 `registry`**（写回 GitHub Packages 会重新变成需要 token
   的一条路线）；发布前必须 `pnpm run check:pack` 全绿。**不要把 npm token 写进仓库任何文件**，

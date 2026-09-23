@@ -57,13 +57,19 @@ pnpm install && pnpm run build
 test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
 dsh --profile test-account --from-default-profile web --dump-config >/dev/null
 
-# 3) 装进目标 profile（两个包都要显式给出：cordis.patch.yml 按包名解析 provider）
-dsh plugin --profile test-account add ./packages/test-account ./packages/playwright-mcp-storage
+# 3) 装进目标 profile —— 只报主包：它把 provider 声明成了自己的依赖（伞包），
+#    pnpm 会连带装好 @songxiyuan/playwright-mcp-storage
+dsh plugin --profile test-account add ./packages/test-account
 ```
 
 三条命令都在**仓库根目录**执行（`dsh plugin` 会把相对路径锚到当前目录）、都幂等。没有 `dsh`
 时把命令里的 `dsh` 换成 `npx -y @deepseek-ai/dsh@0.1.5-rc.3`。
 
+- **只报主包就够了**：`packages/test-account` 的 `dependencies` 里声明了
+  `@songxiyuan/playwright-mcp-storage`（**伞包**），所以第 3 条只写 `./packages/test-account`。
+  `cordis.patch.yml` 里那行 provider 按包名解析，走的就是这条依赖边：DSH 启动时按
+  「安装目录 → 各 bundle 根」展开依赖图，bundle 根锚在包的真实目录上，所以 pnpm 放在
+  `packages/test-account/node_modules/` 下的 provider 能被找到。
 - **第 1 条不能省**：`dsh plugin add <本地目录>` 只建 `link:`，不跑 `build`（`prepack` 只在
   `npm pack` / `publish` 时执行）。漏掉就是"装成功但没面板"。
 - **第 2 条不能省**：`dsh plugin` 自己建的 profile 用 `DEFAULT_PROFILE_BUNDLES =
@@ -74,28 +80,31 @@ dsh plugin --profile test-account add ./packages/test-account ./packages/playwri
 
 ### 1.3 路线 B：公共 npm
 
-两个包都发在公共 npm（scope `@songxiyuan`），**装的时候不需要 token、不需要 `.npmrc`**：
+两个包都发在公共 npm（scope `@songxiyuan`），**装的时候不需要 token、不需要 `.npmrc`**。
+`@songxiyuan/test-account` 把 provider 声明成了自己的依赖（**伞包，0.1.2 起**），所以**只报主包**：
 
 ```bash
 # 0) profile 不存在时先按 web 模板初始化（同 §1.2 第 2 条，理由相同）
 test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
 dsh --profile test-account --from-default-profile web --dump-config >/dev/null
 
-# 1) 装进目标 profile（两个包都要显式给出：cordis.patch.yml 按包名解析 provider）
-dsh plugin --profile test-account add \
-  @songxiyuan/test-account \
-  @songxiyuan/playwright-mcp-storage
+# 1) 装进目标 profile —— 一个包名就够，provider 由 pnpm 作为依赖自动装上
+dsh plugin --profile test-account add @songxiyuan/test-account
 ```
 
 | 场景 | 命令 |
 | --- | --- |
 | 首次安装 | 上面两条（初始化 + `add`） |
-| 升级到最新版 | `dsh plugin --profile <p> update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`，再重启该 profile |
-| 装指定版本 | `dsh plugin --profile <p> add @songxiyuan/test-account@0.1.1 @songxiyuan/playwright-mcp-storage@0.1.1` |
+| 升级到最新版 | `dsh plugin --profile <p> update @songxiyuan/test-account`，再重启该 profile |
+| 装指定版本 | `dsh plugin --profile <p> add @songxiyuan/test-account@0.1.2` |
 
-> **从 GitHub Packages 迁过来**：0.1.0 只在 GitHub Packages 上。公共 npm 的 0.1.1 与它同 scope 同名，
+> **0.1.1 及更早没有这条依赖边**，那两个包名都得写：
+> `dsh plugin --profile <p> add @songxiyuan/test-account@0.1.1 @songxiyuan/playwright-mcp-storage@0.1.1`。
+> 只写主包会以 `ERR_MODULE_NOT_FOUND: Cannot find package '@songxiyuan/playwright-mcp-storage'` 启动失败。
+
+> **从 GitHub Packages 迁过来**：0.1.0 只在 GitHub Packages 上。公共 npm 的 0.1.1+ 与它同 scope 同名，
 > 直接 `update` 到 `^0.1.0` 范围外即可换源；若 lockfile 仍指向 `npm.pkg.github.com`（报 `401` / `404`），
-> 强制重解析：`dsh plugin --profile <p> add @songxiyuan/test-account@0.1.1 @songxiyuan/playwright-mcp-storage@0.1.1`。
+> 强制重解析：`dsh plugin --profile <p> add @songxiyuan/test-account@0.1.2`。
 > 装完把 `~/.npmrc` 里为 GitHub Packages 加的 `@songxiyuan:registry=…` 与
 > `//npm.pkg.github.com/:_authToken=…` 两行删掉。
 
@@ -108,16 +117,21 @@ test -f packages/test-account/lib/client.js &&
 test -f packages/playwright-mcp-storage/lib/index.js &&
 echo "OK: build artifacts"
 
-# B. profile 依赖齐全 + bundle patch 已挂载（纯读，无副作用）
+# B. profile 依赖齐全 + bundle patch 已挂载 + provider 能解析（纯读，无副作用）
+#    只断言「主包是直接依赖」：provider 走伞包依赖边，不该再要求它出现在 dependencies 里
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}" node -e '
-const fs=require("fs"),path=require("path");
+const fs=require("fs"),path=require("path"),{createRequire}=require("module");
 const home=process.env.DSH_HOME,name=process.argv[1];
-const p=JSON.parse(fs.readFileSync(path.join(home,"profiles",name,"package.json"),"utf8"));
-const need=["@songxiyuan/test-account","@songxiyuan/playwright-mcp-storage"];
-const missing=need.filter(n=>!p.dependencies||!p.dependencies[n]);
+const dir=path.join(home,"profiles",name);
+const p=JSON.parse(fs.readFileSync(path.join(dir,"package.json"),"utf8"));
+const direct=!!(p.dependencies&&p.dependencies["@songxiyuan/test-account"]);
 const bundles=(p.dsh&&p.dsh.profile&&p.dsh.profile.bundles)||[];
-if(missing.length||!bundles.includes("@songxiyuan/test-account")){console.error("FAIL",{missing,bundles});process.exit(1);}
-console.log("OK: profile",name,"deps=2 bundle-patch=yes");' test-account
+let provider=null;
+const anchor=path.join(dir,"node_modules/@songxiyuan/test-account/package.json");
+if(fs.existsSync(anchor))provider=createRequire(anchor).resolve("@songxiyuan/playwright-mcp-storage");
+if(!direct||!bundles.includes("@songxiyuan/test-account")||!provider){
+  console.error("FAIL",{direct,bundles,provider});process.exit(1);}
+console.log("OK: profile",name,"direct-dep=1 bundle-patch=yes provider="+provider);' test-account
 
 # C. 类型 + 构建 + 单测 + client bundle 结构 + 发布包完整性
 pnpm run verify
@@ -177,16 +191,17 @@ node_min: "22.18"
 local_source:
   build: "pnpm install && pnpm run build"
   init_profile: "test -f \"${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json\" || dsh --profile test-account --from-default-profile web --dump-config >/dev/null"
-  add: "dsh plugin --profile test-account add ./packages/test-account ./packages/playwright-mcp-storage"
+  add: "dsh plugin --profile test-account add ./packages/test-account"
   linked: true  # link: 安装：改完源码 rebuild + 重启即可，不必重装
 registry_entry:
   registry: "https://registry.npmjs.org"
   scope: "@songxiyuan"
   auth: "none (public packages)"
-  add: "dsh plugin --profile <p> add @songxiyuan/test-account @songxiyuan/playwright-mcp-storage"
-  update: "dsh plugin --profile <p> update @songxiyuan/test-account @songxiyuan/playwright-mcp-storage  # 然后重启该 profile"
+  umbrella_since: "0.1.2"  # 主包把 provider 声明为依赖：只报主包，provider 自动装上
+  add: "dsh plugin --profile <p> add @songxiyuan/test-account"
+  update: "dsh plugin --profile <p> update @songxiyuan/test-account  # 然后重启该 profile"
 local_packages: [packages/test-account, packages/playwright-mcp-storage]
-profile_checks: { dependencies_present: 2, bundles_contains: "@songxiyuan/test-account" }
+profile_checks: { direct_dep: "@songxiyuan/test-account", provider_resolvable: true, bundles_contains: "@songxiyuan/test-account" }
 start: "dsh --profile test-account --port 3081"
 verify: "pnpm run verify"
 account_store: "${DSH_HOME:-~/.dsh}/test-accounts"
@@ -391,7 +406,7 @@ scope 的 read+write）；`GITHUB_TOKEN` 只用来挂 Release tarball。开了 2
 **Bypass 2FA**，否则报 `E403 … bypass 2fa enabled is required`。
 
 ```bash
-git tag v0.1.1 && git push origin v0.1.1   # 或 Actions → publish → Run workflow
+git tag v0.1.2 && git push origin v0.1.2   # 或 Actions → publish → Run workflow
 ```
 
 - 本地 `npm whoami` 通过不等于能发布：`E403` 大多是 2FA。发多个包用
