@@ -32,7 +32,7 @@
 `install.sh`：
 
 ```bash
-./install.sh test-account        # 默认 profile；详见根 README「零、AI 安装引导（Agent 执行清单）」
+./install.sh test-account        # 默认 profile；详见根 README「一、安装」
 ```
 
 没有源码的机器从 GitHub Packages 装（本包在公开 npm 上不存在，且 GitHub Packages 对 public 包也要认证）：
@@ -46,7 +46,7 @@ dsh plugin --profile test-account add \
   @songxiyuan/playwright-mcp-storage
 ```
 
-`cordis.patch.yml` 按包名解析本 provider，所以 profile 的顶层依赖里必须有它；细节见根 README §0.2B。
+`cordis.patch.yml` 按包名解析本 provider，所以 profile 的顶层依赖里必须有它；细节见根 README §1.3。
 
 ## 参数拼装
 
