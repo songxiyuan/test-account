@@ -112,7 +112,7 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
 
 ## 安装约定
 
-分发有两条路线，**同一个 profile 只走一条**：
+分发有三条路线，**同一个 profile 只走一条**：
 
 - **路线 A（开发机、有源码）**：`./install.sh [profile]` 是唯一推荐安装入口；默认 profile 为
   `test-account`，从 DSH 自带 `web` 模板初始化。脚本优先用 PATH 上的 `dsh`（取不到才 npx 拉
@@ -131,12 +131,15 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
   然后 `dsh plugin --profile <p> add @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`
   （两个包都要显式给出：`cordis.patch.yml` 按包名解析 provider），升级用
   `dsh plugin --profile <p> update` + 重启该 profile 的 DSH 进程。
-- 发布：`pnpm run publish:gh`（= `verify` + `pnpm -r publish`），`publishConfig.registry` 已经指向
-  GitHub Packages；发布前必须 `pnpm run check:pack` 全绿。**不要把 PAT 写进仓库任何文件**，
-  只写目标机器的 `~/.npmrc`（CI 用 secret / `GITHUB_TOKEN` + `packages: write`）。
+- **路线 C（目标机器零凭据）**：`.github/workflows/publish.yml` 会把两个 `.tgz` 挂到 `v*` tag 的 Release
+  上，Release 资产匿名可下载，`dsh plugin --profile <p> add <两个 tarball URL>` 即可装，不跑 `prepare`、
+  不过 `allowBuilds`、不需要 `~/.npmrc`（tarball 安装这三条都已实测）。
+- 发布：CI（`publish.yml`，`GITHUB_TOKEN`）或本地 `pnpm run publish:gh`（需要 classic PAT）。
+  `publishConfig.registry` 已经指向 GitHub Packages；发布前必须 `pnpm run check:pack` 全绿。
+  **不要把 PAT 写进仓库任何文件**，只写目标机器的 `~/.npmrc`（CI 用 secret / `GITHUB_TOKEN`）。
 - 根 README 的「零、AI 安装引导（Agent 执行清单）」是给 AI Agent 的自包含安装规程（前置检查、
-  逐条命令、成功信号、安装后自检、故障→处理、硬性约束、机器可读摘要），两条路线都在里面
-  （§0.2 / §0.2B）。改动安装入口、包清单、版本线或自检方式时，必须同步更新该节，保持命令可直接复制执行。
+  逐条命令、成功信号、安装后自检、故障→处理、硬性约束、机器可读摘要），三条路线都在里面
+  （§0.2 / §0.2B / §0.2C）。改动安装入口、包清单、版本线或自检方式时，必须同步更新该节，保持命令可直接复制执行。
 - 插件通过 `dsh plugin --profile <p> add <本地路径或 registry 包名>` 安装；`@songxiyuan/test-account`
   声明了 `dsh.bundle.patch`，安装后会被自动加进该 profile 的 `dsh.profile.bundles`。
 - 不要写 `postinstall` 去改用户的 DSH profile。

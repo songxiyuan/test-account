@@ -1,0 +1,81 @@
+# Publish the two packages to GitHub Packages (+ attach tarballs to the Release).
+#
+# Everything here uses the runner's own GITHUB_TOKEN, so publishing needs no
+# personal access token from anyone: `packages: write` for the registry,
+# `contents: write` for the Release assets.
+#
+#   git tag v0.1.0 && git push origin v0.1.0     # tag → publish + release assets
+#   Actions → publish → Run workflow             # same, against the current commit
+#
+# The scope in the package names must equal the repository owner (GitHub
+# Packages requirement) — see packages/*/package.json.
+name: publish
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # No scope mapping yet on purpose: the default registry stays npmjs.org so
+      # `@deepseek-ai/*` resolves normally. The workspace itself never depends on
+      # `@songxiyuan/*`.
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      # typecheck + build + tests + client bundle structure + pack integrity
+      - name: verify
+        run: pnpm run verify
+
+      - name: publish to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            printf '@songxiyuan:registry=https://npm.pkg.github.com\n'
+            printf '//npm.pkg.github.com/:_authToken=%s\n' "$NODE_AUTH_TOKEN"
+          } >> .npmrc
+          pnpm -r --filter './packages/*' publish --no-git-checks
+
+      # `npm pack` runs each package's prepack, so the tarballs carry a fresh lib/.
+      - name: pack release tarballs
+        run: |
+          mkdir -p dist
+          (cd packages/test-account && npm pack --pack-destination "$GITHUB_WORKSPACE/dist")
+          (cd packages/playwright-mcp-storage && npm pack --pack-destination "$GITHUB_WORKSPACE/dist")
+
+      # Tag runs get a Release whose assets install with no token at all.
+      - name: attach tarballs to the Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tgz \
+            --title "$GITHUB_REF_NAME" \
+            --notes "DSH 测试账号插件 ${GITHUB_REF_NAME}：GitHub Packages 的镜像 tarball，供没有 token 的机器安装。" \
+          || gh release upload "$GITHUB_REF_NAME" dist/*.tgz --clobber
+
+      - name: keep the tarballs as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarballs
+          path: dist/*.tgz

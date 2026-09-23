@@ -34,6 +34,7 @@ mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
 | --- | --- | --- |
 | 有本仓库 checkout 的开发机 | A：本地源码安装 | `./install.sh <profile>`（[§0.2](#02-路线-a本地源码一键安装开发机)） |
 | 只有 DSH、没有源码的机器 | B：从 GitHub Packages 装 `@songxiyuan/*` | 配一次 `~/.npmrc`，再 `dsh plugin --profile <p> add …`（[§0.2B](#02b-路线-b从-github-packages-安装其他机器)） |
+| 不想在目标机器配 token | C：GitHub Release 的 tarball | `dsh plugin --profile <p> add <release 资产 URL>`（[§0.2C](#02c-路线-cgithub-release-的-tarball目标机器零凭据)） |
 
 ### 0.1 前置条件（先验证，缺什么先补什么）
 
@@ -44,7 +45,7 @@ mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
 | 3 | bash | `bash --version` | 能跑 `install.sh`；Windows 用 Git Bash / WSL，或走 §0.3 |
 | 4 | 网络 | `npm ping` | `PONG`（要能拉 npm 上的 `@deepseek-ai/*`） |
 | 5 | 浏览器（可选） | macOS `ls "/Applications/Google Chrome.app"` | 有 Chrome / Chromium / Edge 则登录态功能开箱即用；没有也能装完，见 §0.6 |
-| 6 | 路线 B 额外项 | `npm config get //npm.pkg.github.com/:_authToken` | 有值（classic PAT）；GitHub Packages 连 public 包都不允许匿名安装，见 §0.2B |
+| 6 | 路线 B 额外项 | `npm config get //npm.pkg.github.com/:_authToken` | 有值（classic PAT）；GitHub Packages 连 public 包都不允许匿名安装，见 §0.2B。走路线 C（Release tarball）则不需要 |
 
 ### 0.2 路线 A：本地源码一键安装（开发机）
 
@@ -100,7 +101,26 @@ dsh --profile test-account --port 3081
 - 两个包**都要** add：`cordis.patch.yml` 按包名解析 provider，profile 里必须有它。DSH 生成的 profile 用
   `nodeLinker: hoisted`，所以顶层依赖最稳（不要只靠传递依赖）。
 - 升级：`dsh plugin --profile test-account update`，然后重启该 profile 的 DSH 进程。
-- 没有 token 或不想用 GitHub Packages 的机器：走 §0.2 的本地源码路线，或让维护者发 Release tarball。
+- 不想在目标机器配 token：走 §0.2C。
+
+### 0.2C 路线 C：GitHub Release 的 tarball（目标机器零凭据）
+
+GitHub Packages 连 public 包都要求 token，这是它的硬限制。所以每条 `v*` tag 的 CI 会把两个构建好的
+`.tgz` 一并挂到 Release 上（[§十](#十发布到-github-packages维护者)），Release 资产**匿名可下载**：
+
+```bash
+V=0.1.0
+BASE="https://github.com/songxiyuan/test-account/releases/download/v$V"
+
+dsh plugin --profile test-account add \
+  "$BASE/songxiyuan-test-account-$V.tgz" \
+  "$BASE/songxiyuan-playwright-mcp-storage-$V.tgz"
+```
+
+- tarball 里已经是构建好的 `lib/`：安装时不跑 `prepare`、不过 `allowBuilds`、**不需要 `~/.npmrc`**
+  （本地实测：tarball 安装 exit 0，不触发任何构建脚本）。
+- 升级要指向新版本的 URL 重新 add（profile 里记的是那一条 URL，`update` 只会重拉同一个资产）。
+- 先确认资产在不在：`curl -I "$BASE/songxiyuan-test-account-$V.tgz"` 应为 302/200。
 
 ### 0.3 手工分步（`install.sh` 不可用时，与 §0.2 等价）
 
@@ -213,6 +233,13 @@ registry_entry:                     # 路线 B（其他机器，GitHub Packages�
   auth: "~/.npmrc: @songxiyuan:registry=… + //npm.pkg.github.com/:_authToken=<classic PAT, read:packages>"
   add: "dsh plugin --profile <p> add @songxiyuan/test-account @songxiyuan/playwright-mcp-storage"
   update: "dsh plugin --profile <p> update  # 然后重启该 profile 的 DSH 进程"
+tarball_entry:                      # 路线 C（目标机器零凭据，CI 挂到 Release 的资产）
+  url_pattern: "https://github.com/songxiyuan/test-account/releases/download/v<VERSION>/songxiyuan-<pkg>-<VERSION>.tgz"
+  add: "dsh plugin --profile <p> add <两个 tarball URL>"
+ci_publish:                         # 发布（不需要本地 PAT）
+  workflow: .github/workflows/publish.yml
+  trigger: "git tag v<VERSION> && git push origin v<VERSION>  # 或 Actions → publish → Run workflow"
+  token: "runner 自带的 GITHUB_TOKEN（packages: write / contents: write）"
 default_profile: test-account
 dsh_version: 0.1.5-rc.3
 cordis_version: 4.0.2
@@ -586,7 +613,9 @@ account_use     → 切到 free-us（该账号的 cookies + localStorage 灌进�
 两个包发到 GitHub Packages（scope 必须等于仓库 owner：`@songxiyuan` → `songxiyuan/test-account`）。
 发布前先做一次性准备，之后每次发版都是 `pnpm run publish:gh`。
 
-### 10.1 一次性准备
+### 10.1 一次性准备（只做本地发布才需要）
+
+> CI 发布（§10.2 上半）不需要这一步：workflow 用 runner 自带的 `GITHUB_TOKEN`。
 
 ```bash
 # classic PAT（GitHub Packages 不支持 fine-grained token）：
@@ -602,11 +631,22 @@ npm whoami --registry https://npm.pkg.github.com      # 应打印 songxiyuan
 
 ### 10.2 每次发版
 
+**CI 发布（推荐，不需要任何本地 token）**：`.github/workflows/publish.yml` 用 runner 自带的
+`GITHUB_TOKEN`（`packages: write` + `contents: write`）跑 `install → verify → pnpm -r publish`，
+并把两个 `.tgz` 挂到同名 Release 上。
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0     # tag → 发布 + Release 资产
+# 或者：Actions → publish → Run workflow（对当前 commit 跑一遍，不建 Release 资产只在 tag 时做）
+```
+
+**本地发布**（有 classic PAT 时）：
+
 ```bash
 pnpm run verify          # typecheck + build + test + bundle 结构 + 发布包完整性（check-pack）
 pnpm run publish:gh      # = verify && pnpm -r --filter './packages/*' publish
 
-# 预发布版本（不占正式号）：版本写成 0.1.1-rc.1，装的时候指定 tag
+# 预发布版本（不占正式号）：版本写成 0.1.1-rc.1，装的时候指定版本
 # dsh plugin --profile <p> add @songxiyuan/test-account@0.1.1-rc.1
 
 # 只更新其中一个包：在包目录里 npm publish（prepack 会先构建）
