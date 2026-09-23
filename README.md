@@ -364,13 +364,19 @@ pnpm run publish:npm
 
 **CI 发布**：`.github/workflows/publish.yml` 用仓库 secret `NPM_TOKEN`（npm automation 或 granular
 token，`@songxiyuan` scope 的 read+write）；runner 自带的 `GITHUB_TOKEN` 只用来挂 Release tarball。
+开了 2FA 的账号必须勾 granular token 的 **Bypass 2FA**，否则 CI 也会拿到同一个 403。
 
 ```bash
 git tag v0.1.1 && git push origin v0.1.1   # 或 Actions → publish → Run workflow
 ```
 
 - 不推荐用仓库 secret 的 `NODE_AUTH_TOKEN` 名字以外的写法：workflow 里写的是 `NPM_TOKEN`，改名要同步。
-- 开启账号 2FA 时，本地 `npm publish` 会要 OTP；`--auth-type=legacy` 只在需要老式 token 时用。
+- **账号开了 2FA 时**：`npm login` 只解决身份，每次 `npm publish` 仍要一个 OTP，否则报
+  `E403 … Two-factor authentication or granular access token with bypass 2fa enabled is required`。
+  本地发用 `pnpm -r --filter './packages/*' publish --otp=<6 位码> --registry https://registry.npmjs.org`
+  （OTP 约 30 秒过期；npm 校验通过后会缓存几分钟，两个包一次命令就能发完），或者按下面用 bypass-2FA 的
+  granular token。
+- 本地 `npm whoami` 通过不等于能发布：`E403` 大多是 2FA（见上一条），不是 token 写错。
 - `prepack` 负责构建；`files` 只写目录，绝不列具体文件名（否则发布包缺兄弟模块）。
 - `publishConfig` 只留 `access: public`：**不要**再写 `registry`，否则又会发到别的源。
 - 改 scope 要一起改：两个 `package.json`、`cordis.patch.yml`、`client/index.tsx` 的 `PANEL_ID`、
