@@ -1,8 +1,12 @@
 {
-  "name": "@dsh-test-account/playwright-mcp-storage",
+  "name": "@songxiyuan/playwright-mcp-storage",
   "version": "0.1.0",
-  "private": true,
   "description": "Playwright MCP browser provider with the upstream storage capability enabled, mounted once per live Session through @deepseek-ai/dsh-mcp-client",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/songxiyuan/test-account.git",
+    "directory": "packages/playwright-mcp-storage"
+  },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -14,11 +18,15 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/index.d.ts"
+    "lib"
   ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test"
   },

@@ -14,7 +14,7 @@
  * - `--allow-unrestricted-file-access` (opt-in, on by default) lets those tools
  *   read and write the account state directory outside the Session workspace.
  *
- * @module @dsh-test-account/playwright-mcp-storage
+ * @module @songxiyuan/playwright-mcp-storage
  */
 
 import type { Context } from '@deepseek-ai/cordis'

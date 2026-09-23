@@ -9,7 +9,9 @@
     "build": "pnpm -r --filter './packages/*' run build",
     "typecheck": "pnpm -r --filter './packages/*' run typecheck",
     "test": "pnpm -r --filter './packages/*' run test",
-    "verify": "pnpm run typecheck && pnpm run build && pnpm run test && node scripts/check-bundle.mjs packages/test-account",
+    "verify": "pnpm run typecheck && pnpm run build && pnpm run test && node scripts/check-bundle.mjs packages/test-account && node scripts/check-pack.mjs",
+    "check:pack": "node scripts/check-pack.mjs",
+    "publish:gh": "pnpm run verify && pnpm -r --filter \"./packages/*\" publish --no-git-checks",
     "install:profile": "bash ./install.sh",
     "smoke:ui": "node scripts/smoke-ui.mjs"
   },

@@ -5,7 +5,7 @@
     # it browser_storage_state / browser_set_storage_state) never reaches an
     # Agent there. This provider adds exactly that switch.
     - id: test-account-playwright-mcp
-      name: '@dsh-test-account/playwright-mcp-storage'
+      name: '@songxiyuan/playwright-mcp-storage'
       config:
         mode: launch
         # Saving a login state needs a human to log in, so the window stays visible.
@@ -17,7 +17,7 @@
         # autoExecutablePath: false to use the Playwright-managed browser.
 
     - id: test-account
-      name: '@dsh-test-account/test-account'
+      name: '@songxiyuan/test-account'
       config:
         mcpProvider: playwright-mcp
         stateAccess: direct

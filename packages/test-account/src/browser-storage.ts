@@ -286,7 +286,7 @@ export class BrowserStorageBridge {
       throw new BrowserStorageError(
         'browser-tool-unavailable',
         `当前 Session 看不到浏览器工具 ${name}。请确认 profile 已挂载带 storage 能力的 Playwright MCP provider` +
-          '（@dsh-test-account/playwright-mcp-storage），并且本 Session 已经建立浏览器连接。',
+          '（@songxiyuan/playwright-mcp-storage），并且本 Session 已经建立浏览器连接。',
       )
     }
   }

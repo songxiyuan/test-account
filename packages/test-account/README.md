@@ -1,4 +1,4 @@
-# @dsh-test-account/test-account
+# @songxiyuan/test-account
 
 账号元数据注册表 + 右侧栏面板 + 当前 Session 的 Playwright `storageState` 桥。
 
@@ -8,18 +8,33 @@
 - **bundle 补丁**（`cordis.patch.yml`）：挂载本仓库的 storage provider，以及本插件自身。
 
 它不启动浏览器、不存密码、不做自动登录；浏览器操作全部转发给当前 Session 已经持有的
-Playwright MCP 工具（由 `@dsh-test-account/playwright-mcp-storage` 按 Session 挂载）。
+Playwright MCP 工具（由 `@songxiyuan/playwright-mcp-storage` 按 Session 挂载）。
 
 ## 安装
 
 本包不是独立安装的：它是 `dsh.bundle.patch` 的载体，必须和 storage provider 一起装进同一个
-DSH profile，否则面板、路由和浏览器工具都不完整。用仓库根的 `install.sh` 一次装好：
+DSH profile，否则面板、路由和浏览器工具都不完整。
+
+有源码的开发机，用仓库根的 `install.sh` 一次装好：
 
 ```bash
 ./install.sh test-account        # 默认 profile；详见根 README「零、AI 安装引导（Agent 执行清单）」
 ```
 
-安装后 profile 的 `dsh.profile.bundles` 会自动包含 `@dsh-test-account/test-account`（来自本包的
+没有源码的机器，从 GitHub Packages 装（公开 npm 上没有这个包）：
+
+```bash
+# 一次性：~/.npmrc 里写 scope 映射 + classic PAT（read:packages）
+#   @songxiyuan:registry=https://npm.pkg.github.com
+#   //npm.pkg.github.com/:_authToken=<classic PAT>
+dsh plugin --profile test-account add \
+  @songxiyuan/test-account \
+  @songxiyuan/playwright-mcp-storage
+```
+
+GitHub Packages 对 public 包也要求认证，所以没配 token 的机器会拿到 `401` / `404`；细节见根 README §0.2B。
+
+安装后 profile 的 `dsh.profile.bundles` 会自动包含 `@songxiyuan/test-account`（来自本包的
 `cordis.patch.yml`），无需手工改 `cordis.yml`。
 
 ## 路由与端点
@@ -80,7 +95,7 @@ Host 半用 `test-account` 作为 logger 名，记录创建/删除账号、保�
 ## 测试
 
 ```bash
-pnpm --filter @dsh-test-account/test-account test
+pnpm --filter @songxiyuan/test-account test
 ```
 
 `test/account-store.test.ts` 覆盖文件读写、id 校验、去重、清空可选字段、路径越界、脏 JSON；

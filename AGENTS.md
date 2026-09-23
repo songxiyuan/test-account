@@ -32,6 +32,7 @@ packages/playwright-mcp-storage/               # 按 Session 挂 @playwright/mcp
   src/session-mcp.ts                           # 每个 live Agent 一个 scoped dsh-mcp-client
 scripts/build-client.mjs                       # 客户端 bundle 打包（复刻 DSH 的懒加载 CJS 契约）
 scripts/check-bundle.mjs                       # 客户端 bundle 结构检查
+scripts/check-pack.mjs                         # 发布包完整性检查（npm pack 清单 vs 相对导入）
 scripts/smoke-ui.mjs                           # 真机 Chrome 的 UI 冒烟（需要一个已启动实例）
 doc/dsh-test-account-plugin-design.md          # 原始设计方案（只读参考）
 ```
@@ -93,11 +94,14 @@ pnpm install
 pnpm run typecheck     # host + client 类型检查
 pnpm run build         # tsc → lib/index.js，esbuild → lib/client.js
 pnpm run test          # node:test（无额外测试框架依赖）
-pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
+pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查 + 发布包完整性（check:pack）
 ```
 
 - 测试用 Node 内置 `node --test` + 原生 TS type stripping，不要引入 jest/vitest。
 - `lib/` 是构建产物，已在 `.gitignore` 中，不要提交。
+- `scripts/check-pack.mjs` 读真正的 `npm pack` 清单，断言每个 `lib/*.js` 的相对导入也在包里。
+  两个包的 `files` **只能写目录**（`lib` / `cordis.patch.yml`）：写成具体文件名会让发布包缺兄弟模块，
+  本地永远复现不了（checkout 里文件齐全），装到别的机器才炸。改 `files` 后必须跑 `pnpm run check:pack`。
 - 修改账号存储或浏览器桥后，必须补/改 `packages/test-account/test/*.test.ts`。
 - 改动跨层链路（路由 / 工具执行 / provider 参数）后，除了单测还应跑一次真机冒烟：
   起一个 profile，然后 `node scripts/smoke-ui.mjs "<带 token URL>" --home <DSH_HOME>`，
@@ -108,15 +112,33 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
 
 ## 安装约定
 
-- `./install.sh [profile]` 是唯一推荐安装入口；默认 profile 为 `test-account`，从 DSH 自带 `web`
-  模板初始化。脚本优先用 PATH 上的 `dsh`（取不到才 npx 拉 `0.1.5-rc.3`），并在装包前移除 profile 里
-  残留的 0.1.7 browser-use 栈（`@deepseek-ai/dsh-browser-use` /
-  `@deepseek-ai/dsh-experimental-browser-use-runtime` / 旧 provider）。
+分发有两条路线，**同一个 profile 只走一条**：
+
+- **路线 A（开发机、有源码）**：`./install.sh [profile]` 是唯一推荐安装入口；默认 profile 为
+  `test-account`，从 DSH 自带 `web` 模板初始化。脚本优先用 PATH 上的 `dsh`（取不到才 npx 拉
+  `0.1.5-rc.3`），并在装包前移除 profile 里残留的 0.1.7 browser-use 栈
+  （`@deepseek-ai/dsh-browser-use` / `@deepseek-ai/dsh-experimental-browser-use-runtime` / 旧 provider）
+  与改名前的 `@dsh-test-account/*` 两个包。
+- **路线 B（没有源码的机器）**：从 GitHub Packages 装 `@songxiyuan/*`。scope 必须等于仓库 owner
+  （GitHub Packages 的硬性要求）；registry 是 `https://npm.pkg.github.com`，**对 public 包也要求
+  classic PAT**（不支持 fine-grained token），所以目标机器先写 `~/.npmrc`：
+
+  ```bash
+  @songxiyuan:registry=https://npm.pkg.github.com
+  //npm.pkg.github.com/:_authToken=<classic PAT, read:packages>
+  ```
+
+  然后 `dsh plugin --profile <p> add @songxiyuan/test-account @songxiyuan/playwright-mcp-storage`
+  （两个包都要显式给出：`cordis.patch.yml` 按包名解析 provider），升级用
+  `dsh plugin --profile <p> update` + 重启该 profile 的 DSH 进程。
+- 发布：`pnpm run publish:gh`（= `verify` + `pnpm -r publish`），`publishConfig.registry` 已经指向
+  GitHub Packages；发布前必须 `pnpm run check:pack` 全绿。**不要把 PAT 写进仓库任何文件**，
+  只写目标机器的 `~/.npmrc`（CI 用 secret / `GITHUB_TOKEN` + `packages: write`）。
 - 根 README 的「零、AI 安装引导（Agent 执行清单）」是给 AI Agent 的自包含安装规程（前置检查、
-  逐条命令、成功信号、安装后自检、故障→处理、硬性约束、机器可读摘要）。改动安装入口、包清单、
-  版本线或自检方式时，必须同步更新该节，保持命令可直接复制执行。
-- 插件通过 `dsh plugin --profile <p> add <本地路径>` 安装；`@dsh-test-account/test-account` 声明了
-  `dsh.bundle.patch`，安装后会被自动加进该 profile 的 `dsh.profile.bundles`。
+  逐条命令、成功信号、安装后自检、故障→处理、硬性约束、机器可读摘要），两条路线都在里面
+  （§0.2 / §0.2B）。改动安装入口、包清单、版本线或自检方式时，必须同步更新该节，保持命令可直接复制执行。
+- 插件通过 `dsh plugin --profile <p> add <本地路径或 registry 包名>` 安装；`@songxiyuan/test-account`
+  声明了 `dsh.bundle.patch`，安装后会被自动加进该 profile 的 `dsh.profile.bundles`。
 - 不要写 `postinstall` 去改用户的 DSH profile。
 
 ## 文档要求

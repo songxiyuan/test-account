@@ -1,4 +1,4 @@
-# @dsh-test-account/playwright-mcp-storage
+# @songxiyuan/playwright-mcp-storage
 
 带 upstream `storage` 能力的 Playwright MCP browser provider，按 Session 直接挂载
 `@playwright/mcp`，不依赖 DSH Browser Use。
@@ -28,12 +28,25 @@
 
 ## 安装
 
-不要单独装本包：它必须和 `@dsh-test-account/test-account` 一起进同一个 profile。用仓库根的
-`install.sh` 一次装好：
+不要单独装本包：它必须和 `@songxiyuan/test-account` 一起进同一个 profile。有源码的开发机用仓库根的
+`install.sh`：
 
 ```bash
 ./install.sh test-account        # 默认 profile；详见根 README「零、AI 安装引导（Agent 执行清单）」
 ```
+
+没有源码的机器从 GitHub Packages 装（本包在公开 npm 上不存在，且 GitHub Packages 对 public 包也要认证）：
+
+```bash
+# 一次性：~/.npmrc 里写 scope 映射 + classic PAT（read:packages）
+#   @songxiyuan:registry=https://npm.pkg.github.com
+#   //npm.pkg.github.com/:_authToken=<classic PAT>
+dsh plugin --profile test-account add \
+  @songxiyuan/test-account \
+  @songxiyuan/playwright-mcp-storage
+```
+
+`cordis.patch.yml` 按包名解析本 provider，所以 profile 的顶层依赖里必须有它；细节见根 README §0.2B。
 
 ## 参数拼装
 
@@ -104,7 +117,7 @@ Chromium：`autoExecutablePath: false` + `npx @playwright/mcp install-browser ch
 ## 测试
 
 ```bash
-pnpm --filter @dsh-test-account/playwright-mcp-storage test
+pnpm --filter @songxiyuan/playwright-mcp-storage test
 ```
 
 `test/args.test.ts` 覆盖默认参数、`--headless` 省略、权限开关、`--caps` 拼接与省略、

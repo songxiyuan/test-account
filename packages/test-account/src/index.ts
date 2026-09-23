@@ -9,7 +9,7 @@
  * The operations themselves live in {@link AccountService}; this module only
  * resolves configuration, builds the collaborators, and publishes the two faces
  * (the `/api/test-account` route and the optional Agent tools).
- * @module @dsh-test-account/test-account
+ * @module @songxiyuan/test-account
  */
 
 import { homedir } from 'node:os'

@@ -4,7 +4,7 @@
  * It contributes one right-Sidebar page type ("测试账号"), its body, and a
  * conversation-header shortcut that opens it. All state lives on the Host; this
  * half only calls the `/test-account` Remote channel.
- * @module @dsh-test-account/test-account/client
+ * @module @songxiyuan/test-account/client
  */
 
 import { createAccountPanel } from './AccountPanel.tsx'
@@ -14,7 +14,7 @@ import type { TestAccountContext } from './contract.ts'
 export const PANEL_KIND = 'test-account'
 
 /** This implementation's identity in the tab system. */
-export const PANEL_ID = '@dsh-test-account/test-account'
+export const PANEL_ID = '@songxiyuan/test-account'
 
 /** Client services required before the panel can register. */
 export const inject = ['connection', 'slots', 'sidebarRight', 'sidebarRightTabs']

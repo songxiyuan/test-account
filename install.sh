@@ -49,12 +49,23 @@ if [[ -f "$PROFILE_DIR/package.json" ]] && grep -q 'browser-use' "$PROFILE_DIR/p
   "${DSH[@]}" plugin --profile "$PROFILE" remove \
     '@deepseek-ai/dsh-browser-use' \
     '@deepseek-ai/dsh-experimental-browser-use-runtime' \
+    '@songxiyuan/browser-use-playwright-mcp-storage' \
     '@dsh-test-account/browser-use-playwright-mcp-storage'
+fi
+
+# The packages used to live under the @dsh-test-account scope. A profile that
+# installed them then would keep a dependency whose package name no longer
+# exists, so drop those names before adding today's ones.
+if [[ -f "$PROFILE_DIR/package.json" ]] && grep -q '@dsh-test-account/' "$PROFILE_DIR/package.json"; then
+  echo "==> migrating profile '${PROFILE}' off the retired @dsh-test-account scope"
+  "${DSH[@]}" plugin --profile "$PROFILE" remove \
+    '@dsh-test-account/test-account' \
+    '@dsh-test-account/playwright-mcp-storage'
 fi
 
 echo "==> installing plugins into profile '${PROFILE}'"
 echo "    (the 'declares no dsh.bundle' warning is expected for the provider;"
-echo "     only @dsh-test-account/test-account carries the bundle patch)"
+echo "     only @songxiyuan/test-account carries the bundle patch)"
 "${DSH[@]}" plugin --profile "$PROFILE" add \
   "$ROOT/packages/test-account" \
   "$ROOT/packages/playwright-mcp-storage"
@@ -65,7 +76,7 @@ cat <<EOF
 
   profile          ${PROFILE}  (~/.dsh/profiles/${PROFILE} unless DSH_HOME says otherwise)
   account store    \${DSH_HOME:-~/.dsh}/test-accounts
-  browser provider @dsh-test-account/playwright-mcp-storage
+  browser provider @songxiyuan/playwright-mcp-storage
                    (@playwright/mcp --caps=storage, one browser per Session)
 
 Start it with (0.1.5 CLI: the app's flags follow the launcher flags):
