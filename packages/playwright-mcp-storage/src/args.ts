@@ -144,9 +144,34 @@ export function validate(config: ResolvedConfig): void {
   }
 }
 
-/** Absolute path of the pinned `@playwright/mcp` CLI shipped with this package. */
-export function playwrightCliPath(): string {
-  return join(dirname(fileURLToPath(import.meta.resolve('@playwright/mcp/package.json'))), 'cli.js')
+/**
+ * Absolute path of the pinned `@playwright/mcp` CLI shipped with this package.
+ *
+ * Node resolves `@playwright/mcp` from this package's own `node_modules` first,
+ * but when that dependency is missing the lookup keeps walking up and can land
+ * on a stale or half-pruned copy hoisted into the profile's `node_modules` by an
+ * earlier install. Such a copy resolves to a path whose `cli.js` is gone, and
+ * the failure then surfaces as an opaque `MODULE_NOT_FOUND` stack from the
+ * spawned MCP child process. Checking the file here turns that into one
+ * actionable error at plugin load.
+ *
+ * @param resolvePackage - resolves the `@playwright/mcp` manifest; injectable for tests.
+ * @returns the absolute CLI path.
+ */
+export function playwrightCliPath(
+  resolvePackage: () => string = () => fileURLToPath(import.meta.resolve('@playwright/mcp/package.json')),
+): string {
+  const cli = join(dirname(resolvePackage()), 'cli.js')
+  if (!existsSync(cli)) {
+    throw new Error(
+      `playwright-mcp-storage: the pinned @playwright/mcp CLI is missing at ${cli}. ` +
+        'This provider serves the browser from its own dependency, so reinstall the plugin: ' +
+        'on the link: route run `pnpm install` in the plugin checkout; ' +
+        'on the registry route run `dsh plugin --profile <p> update @songxiyuan/playwright-mcp-storage`. ' +
+        'Do not rely on a copy hoisted into the profile node_modules — it may be a leftover of an earlier install.',
+    )
+  }
+  return cli
 }
 
 /**

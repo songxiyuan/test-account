@@ -117,6 +117,22 @@ Run `npx @playwright/mcp install-browser chrome-for-testing` to install
 探测不到（例如干净的 CI）就回退到 Playwright 自带浏览器，并打一条 warn 提示两条出路。想强制用自带
 Chromium：`autoExecutablePath: false` + `npx @playwright/mcp install-browser chrome-for-testing`。
 
+## 依赖自检
+
+provider 只从**自己**的依赖里取 `@playwright/mcp`：加载时就会确认解析结果旁边的 `cli.js` 真的存在，
+不存在就直接抛出可执行的错误，而不是等 MCP 子进程炸出一段 `MODULE_NOT_FOUND`：
+
+```text
+playwright-mcp-storage: the pinned @playwright/mcp CLI is missing at …/cli.js. …
+```
+
+这条守卫针对的是一次真实事故：profile 从 registry 安装切到 `link:` 之后，被剪枝的旧
+`@playwright/mcp`（pnpm 提升到 profile `node_modules` 的那份）仍可能被 Node 解析到，provider 于是拿到
+一个 `cli.js` 已消失的路径，故障只在子进程里暴露，现场看不出该修什么。看到这条错误就重装依赖：
+`link:` 路线在插件仓库跑 `pnpm install` 后重启 profile；registry 路线跑
+`dsh plugin --profile <p> update @songxiyuan/playwright-mcp-storage`。**不要**把 `@playwright/mcp`
+单独装进 profile 去"补上"——那正是这次事故的来源。
+
 ## 测试
 
 ```bash
@@ -124,4 +140,4 @@ pnpm --filter @songxiyuan/playwright-mcp-storage test
 ```
 
 `test/args.test.ts` 覆盖默认参数、`--headless` 省略、权限开关、`--caps` 拼接与省略、
-attach/launch 互斥校验、`extraArgs` 追加顺序。
+attach/launch 互斥校验、`extraArgs` 追加顺序，以及上面的 CLI 自检（存在性 + 缺失时的提示语）。

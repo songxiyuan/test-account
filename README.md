@@ -156,6 +156,7 @@ dsh --profile test-account --port 3081
 | `ERR_PNPM_FETCH_401 … registry.npmjs.org` | 公开包匿名可装；报 401 说明 `~/.npmrc` 有失效的 `_authToken`/scope 映射，临时用 `npm_config_userconfig=/dev/null` 复跑定位 |
 | 装上了，但右侧栏/对话头没有「测试账号」 | profile 是 `dsh plugin` 顺手建的、没有 web app；或 Session 还没有 turn；或装进运行中的 profile 后没重启 |
 | `Browser "chrome-for-testing" is not installed` | 装本机 Chrome / Chromium / Edge；或 `npx @playwright/mcp install-browser chrome-for-testing`；或配 `provider.executablePath` |
+| `MODULE_NOT_FOUND … /profiles/<p>/node_modules/@playwright/mcp/cli.js`（早期版本只在子进程里炸） | profile 里剩着一份从 registry 时代剪枝下来的 `@playwright/mcp`；provider 现在加载时就会拦住并报 `@playwright/mcp CLI is missing`。按提示重装依赖：`link:` 路线在插件仓库 `pnpm install` 再重启 profile；registry 路线 `dsh plugin --profile <p> update @songxiyuan/playwright-mcp-storage`。**别**把 `@playwright/mcp` 单独装进 profile |
 | `File access denied ... outside allowed roots` | 用本仓库的 storage provider（默认带 `--allow-unrestricted-file-access`） |
 | 报 `session-not-live` | 拿别的 Session 的 id 调浏览器了，在同一个 Session 内操作 |
 | 装依赖拉到 `0.1.6-alpha` / `0.1.7-alpha` | npm 缓存或旧 lockfile 残留：删掉 `node_modules` 与 `pnpm-lock.yaml` 重装 |

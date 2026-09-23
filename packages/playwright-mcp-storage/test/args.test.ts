@@ -1,8 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   buildArgs,
   detectExecutablePath,
+  playwrightCliPath,
   resolveConfig,
   resolveExecutablePath,
   SYSTEM_BROWSER_CANDIDATES,
@@ -110,5 +114,28 @@ test('attach mode rejects an executable path', () => {
   assert.throws(
     () => validate(resolved({ mode: 'attach', endpoint: 'http://127.0.0.1:9222', executablePath: '/usr/bin/chromium' })),
     /executablePath requires launch mode/u,
+  )
+})
+
+test('the pinned CLI resolves to an existing file next to its manifest', () => {
+  const cli = playwrightCliPath()
+  assert.ok(cli.endsWith(join('@playwright', 'mcp', 'cli.js')), cli)
+  assert.ok(existsSync(cli), cli)
+})
+
+test('a manifest whose cli.js is missing fails with reinstall guidance', () => {
+  // Emulates the leftover this guard exists for: a stale @playwright/mcp copy
+  // still resolvable from the profile, but pruned down to its manifest.
+  const stale = join(tmpdir(), 'playwright-mcp-storage-stale', 'package.json')
+  assert.throws(
+    () => playwrightCliPath(() => stale),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /@playwright\/mcp CLI is missing/u)
+      assert.match(error.message, /cli\.js/u)
+      assert.match(error.message, /pnpm install/u)
+      assert.match(error.message, /dsh plugin --profile/u)
+      return true
+    },
   )
 })
