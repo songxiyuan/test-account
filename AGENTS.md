@@ -7,7 +7,9 @@
 
 **硬性原则（不要在实现里绕过）：**
 
-- 不内嵌 Playwright，不启动第二套浏览器；浏览器生命周期与网页操作全部复用 DSH Browser Use。
+- 不把 Playwright 内嵌进账号插件，不另起一套旁路浏览器；浏览器仍是「这个 Session 的浏览器」，
+  由自带的 `playwright-mcp-storage` provider 在每个 live Agent 的 scope 里挂载 `@playwright/mcp` 提供，
+  账号插件只转发 storage 工具调用。
 - 不保存用户名/密码/验证码，不实现自动登录、OAuth、登录态续期。
 - 不引入数据库；账号元数据是 `accounts.json`，登录态是 Playwright 原生 `storageState` 文件。
 - 不改 DSH 官方包。需要 provider 行为变化时，在本仓库自带一个薄 provider 替换它。
@@ -25,7 +27,9 @@ packages/test-account/                         # 账号插件（Host + Client）
     types.ts                                   # 共享类型、路由与端点名
   client/                                      # Client 半：React 面板，esbuild 打成 lib/client.js
   cordis.patch.yml                             # bundle 补丁，声明该插件依赖的运行时组成
-packages/browser-use-playwright-mcp-storage/   # 带 --caps=storage 的 Playwright MCP provider
+packages/playwright-mcp-storage/               # 按 Session 挂 @playwright/mcp 的薄 provider（--caps=storage）
+  src/args.ts                                  # 参数/配置拼装（可单测）
+  src/session-mcp.ts                           # 每个 live Agent 一个 scoped dsh-mcp-client
 scripts/build-client.mjs                       # 客户端 bundle 打包（复刻 DSH 的懒加载 CJS 契约）
 scripts/check-bundle.mjs                       # 客户端 bundle 结构检查
 scripts/smoke-ui.mjs                           # 真机 Chrome 的 UI 冒烟（需要一个已启动实例）
@@ -34,16 +38,21 @@ doc/dsh-test-account-plugin-design.md          # 原始设计方案（只读参�
 
 ## 版本线
 
-- 目标 DSH：`0.1.7-alpha.1`（Browser Use 系列 npm 上最低 `0.1.6-alpha.1`，peer 要求 `0.1.7`）。
-- `@playwright/mcp` 固定 `0.0.80`，与官方 provider 一致，**不要**单独升级。
-- 所有 `@deepseek-ai/*` 依赖锁在 `0.1.7-alpha.1`，不要用 `latest`。
+- 目标 DSH：`0.1.5-rc.3`。所有 `@deepseek-ai/*` 依赖锁在 `0.1.5-rc.3`；`@deepseek-ai/cordis` 锁 `4.0.2`、
+  `@deepseek-ai/schemastery` 锁 `3.18.2`（0.1.5 包的精确 peer），不要用 `latest`。
+  依赖图里**不允许**出现 `0.1.6-alpha` / `0.1.7-alpha` 包：
+  `grep -E '0\.1\.7-alpha|0\.1\.6-alpha' pnpm-lock.yaml` 必须为空。
+- `@playwright/mcp` 固定 `0.0.80`，**不要**单独升级。
+- **不依赖 DSH Browser Use。** `@deepseek-ai/dsh-browser-use` /
+  `@deepseek-ai/dsh-experimental-browser-use-runtime` 0.1.5 线没有（npm 最低 `0.1.6-alpha.1`），
+  而且会把 Playwright 参数写死、又不透传 `--caps`。provider 改为用 0.1.5 线自带的
+  `@deepseek-ai/dsh-mcp-client`，在每个 live Agent 的 scope 里挂一个 `@playwright/mcp` 子进程。
 - 本机 GUI（`dsh web --port 3080`，launchd 标签 `com.nomis.dsh-web`）跑的是**全局 0.1.5-rc.3** + profile `web`；
   本插件已经装进该 profile，但 `dsh.profile.bundles` 只在启动时合成，改完要重启 GUI 才生效。
-  0.1.5 线 npm 上没有 browser-use 包，所以宿主 0.1.5 + browser-use `0.1.7-alpha.1` 是**预期混装**：
-  该包把 DSH 运行时留成 peer，实际解析走 profile module fallback 到宿主闭包，不会产生 0.1.7 运行时副本。
 - 开发与验证一律用独立 profile（或独立 `DSH_HOME`）；**不要**在没被要求时重启别人正在用的 profile / GUI 进程。
-- 两代 CLI 语法不同：0.1.5 的 `dsh web` 写死 `--profile web`（不接受 `--profile`），启动任意 profile 用
-  `dsh --profile <name> --port <port>`；0.1.7 才支持 `dsh --profile <name> web --port <port>`。
+- 启动任意 profile 用 `dsh --profile <name> --port <port>`（0.1.5 的 `web` 子命令写死 `--profile web`、
+  不接受 `--profile`；`dsh --profile <name> web` 是 0.1.7 才有的语法）。`install.sh` 默认优先用 PATH 上的
+  `dsh`，取不到才 `npx -y @deepseek-ai/dsh@0.1.5-rc.3`。
 
 ## 关键技术约束（改代码前先读）
 
@@ -53,7 +62,12 @@ doc/dsh-test-account-plugin-design.md          # 原始设计方案（只读参�
   （`react` / `react/jsx-runtime` / `react-dom` / `@deepseek-ai/cordis` / `dsh-client-store` /
   `dsh-client-ui-slots` / `dsh-client-ui-primitives` / `dsh-client-ui-dockkit`），其余必须打包进去。
 - `browser_storage_state` / `browser_set_storage_state` 需要 `--caps=storage`；官方 provider 没有
-  透传口子，这就是 `packages/browser-use-playwright-mcp-storage` 存在的唯一原因。
+  透传口子，这就是 `packages/playwright-mcp-storage` 存在的唯一原因。
+- provider 不用 `ctx.browserUse`（那是 0.1.6+ 的服务）：它 `ctx.on('agent/created')` +
+  `createScope(ctx, agent)` + `scope.ctx.plugin(McpClient, …)`，为每个 live Agent 起一个
+  `@playwright/mcp` 子进程；`agent.ctx.effect` 或插件卸载时 dispose 作用域关掉进程。
+  `tools/execute` 上有一道守卫，只有该 Agent 能调自己那套 `mcp__playwright-mcp__*` 工具。
+  `attach` 模式独占：同一时刻只服务一个 live Session。
 - 浏览器本体：`@playwright/mcp` 默认要它自己那份 `chrome-for-testing`，全新机器没有。provider 的
   `autoExecutablePath`（默认开）按平台探测本机 Chrome/Chromium/Edge 并传 `--executable-path`，
   探测不到才回退。改这块时要同时改 `SYSTEM_BROWSER_CANDIDATES` 与 README 的探测顺序表。
@@ -62,8 +76,8 @@ doc/dsh-test-account-plugin-design.md          # 原始设计方案（只读参�
   `owner.webServer`，而 Cordis context tracing 会把 owner 解析回 connection 服务自己的 scope，
   任何插件调用都会抛 `cannot get property "webServer" without inject`。
   `ctx.connection.rpc.intercept('/api', …)` 被 Typert gateway 独占，也不能用。
-- 浏览器操作走 `ctx.tools.execute({ name: 'mcp__<provider>__browser_storage_state', agent, ... })`，
-  `agent` 来自 `ctx.agents.get(sessionId)`。`ctx.browserUse` 只是 provider 注册表，没有浏览器 API。
+- 浏览器操作走 `ctx.tools.execute({ name: 'mcp__playwright-mcp__browser_storage_state', agent, ... })`，
+  `agent` 来自 `ctx.agents.get(sessionId)`。provider 不对外暴露浏览器 API，账号插件只转发这一个调用。
 - MCP 文件访问默认限制在 Session 工作区内；账号目录在工作区外，所以 provider 默认带
   `--allow-unrestricted-file-access`，同时 `browser-storage.ts` 保留 staged 降级路径（有测试覆盖）。
 - 面板（Fetch 路由）与 Agent 工具必须共用 `AccountService`，不要在 `index.ts` / `agent-tools.ts`
@@ -95,7 +109,9 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
 ## 安装约定
 
 - `./install.sh [profile]` 是唯一推荐安装入口；默认 profile 为 `test-account`，从 DSH 自带 `web`
-  模板初始化。
+  模板初始化。脚本优先用 PATH 上的 `dsh`（取不到才 npx 拉 `0.1.5-rc.3`），并在装包前移除 profile 里
+  残留的 0.1.7 browser-use 栈（`@deepseek-ai/dsh-browser-use` /
+  `@deepseek-ai/dsh-experimental-browser-use-runtime` / 旧 provider）。
 - 根 README 的「零、AI 安装引导（Agent 执行清单）」是给 AI Agent 的自包含安装规程（前置检查、
   逐条命令、成功信号、安装后自检、故障→处理、硬性约束、机器可读摘要）。改动安装入口、包清单、
   版本线或自检方式时，必须同步更新该节，保持命令可直接复制执行。

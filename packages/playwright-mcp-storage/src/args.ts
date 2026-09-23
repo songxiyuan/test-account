@@ -120,27 +120,27 @@ export type ResolvedConfig = Required<
 export function validate(config: ResolvedConfig): void {
   if (config.mode === 'attach') {
     if (config.endpoint === undefined || config.endpoint.trim() === '') {
-      throw new Error('browser-use-playwright-mcp-storage: attach mode requires a debugging endpoint')
+      throw new Error('playwright-mcp-storage: attach mode requires a debugging endpoint')
     }
     let endpoint: URL
     try {
       endpoint = new URL(config.endpoint)
     } catch (error) {
-      throw new Error('browser-use-playwright-mcp-storage: endpoint must be a valid HTTP(S) or WS(S) URL', {
+      throw new Error('playwright-mcp-storage: endpoint must be a valid HTTP(S) or WS(S) URL', {
         cause: error,
       })
     }
     if (!['http:', 'https:', 'ws:', 'wss:'].includes(endpoint.protocol) || /\s/u.test(config.endpoint)) {
       throw new Error(
-        'browser-use-playwright-mcp-storage: endpoint must be a valid HTTP(S) or WS(S) URL without whitespace',
+        'playwright-mcp-storage: endpoint must be a valid HTTP(S) or WS(S) URL without whitespace',
       )
     }
   }
   if (config.mode === 'launch' && config.endpoint !== undefined) {
-    throw new Error('browser-use-playwright-mcp-storage: endpoint requires attach mode')
+    throw new Error('playwright-mcp-storage: endpoint requires attach mode')
   }
   if (config.mode === 'attach' && config.executablePath !== undefined) {
-    throw new Error('browser-use-playwright-mcp-storage: executablePath requires launch mode')
+    throw new Error('playwright-mcp-storage: executablePath requires launch mode')
   }
 }
 

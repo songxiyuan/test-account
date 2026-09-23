@@ -17,9 +17,9 @@ DSH Web 右侧栏「测试账号」面板
         ▼
 mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
         ▼
-@dsh-test-account/browser-use-playwright-mcp-storage   ← 官方 provider + --caps=storage
-        ▼
-当前 Session 的 Chromium
+@dsh-test-account/playwright-mcp-storage  ← 每个 live Session 一个 @playwright/mcp
+        ▼                                     进程（--caps=storage），由 dsh-mcp-client
+当前 Session 的 Chromium                      挂在 Agent scope 上；不依赖 browser-use
 ```
 
 ## 零、AI 安装引导（Agent 执行清单）
@@ -43,8 +43,8 @@ mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
 ```bash
 ./install.sh test-account                                   # 默认 profile：test-account
 ./install.sh web                                            # 装进已有 profile（示例）
-DSH_VERSION=0.1.7-alpha.1 ./install.sh test-account         # 钉住 DSH 版本
-DSH_BIN="dsh" ./install.sh web                              # 用 PATH 上已有的 dsh（例如正在跑 GUI 的那一个）
+DSH_VERSION=0.1.5-rc.3 ./install.sh test-account             # 钉住 npx 回退用的 DSH 版本
+DSH_BIN="dsh" ./install.sh web                              # 用 PATH 上已有的 dsh（默认就会优先用它）
 ```
 
 `install.sh` 依次做四件事：
@@ -53,7 +53,7 @@ DSH_BIN="dsh" ./install.sh web                              # 用 PATH 上已有
 | --- | --- | --- |
 | 1 | 仓库内 `pnpm install && pnpm run build` | 生成 `packages/test-account/lib/{index.js,client.js}` 与 provider 的 `lib/index.js` |
 | 2 | 目标 profile **不存在时**才从 DSH 自带 `web` 模板初始化 | 已存在则打印 `already exists; leaving it untouched`（不会重置） |
-| 3 | `dsh plugin add` 4 个包 | 打印安装结果，结尾无 `error` |
+| 3 | `dsh plugin add` 2 个本地包（已有 profile 若残留旧的 browser-use 栈会先移除） | 打印安装结果，结尾无 `error` |
 | 4 | 把本插件写进 `dsh.profile.bundles` | 由 `dsh.bundle.patch` 自动完成，见 §0.4-B |
 
 > 第 2 步必须按目录存在与否判断：`--from-default-profile` 连已存在的 profile 也会拒绝内置模板名
@@ -67,16 +67,15 @@ pnpm install
 pnpm run build
 
 # 2) 仅当目标 profile 还不存在时初始化（已存在就跳过这一步，别对 web 这类内置模板名执行）
+#    下面用 PATH 上的 dsh（0.1.5 线）；没有就换成
+#    npx -y @deepseek-ai/dsh@0.1.5-rc.3
 test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
-npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account \
-  --from-default-profile web --dump-config >/dev/null
+dsh --profile test-account --from-default-profile web --dump-config >/dev/null
 
-# 3) 安装 4 个包（两个本地路径 + 两个官方 browser-use 包）
-npx -y @deepseek-ai/dsh@0.1.7-alpha.1 plugin --profile test-account add \
+# 3) 安装 2 个本地包
+dsh plugin --profile test-account add \
   "$PWD/packages/test-account" \
-  "$PWD/packages/browser-use-playwright-mcp-storage" \
-  "@deepseek-ai/dsh-browser-use@0.1.7-alpha.1" \
-  "@deepseek-ai/dsh-experimental-browser-use-runtime@0.1.7-alpha.1"
+  "$PWD/packages/playwright-mcp-storage"
 ```
 
 ### 0.4 安装后自检（必须全绿再继续）
@@ -87,7 +86,7 @@ PROFILE=test-account
 # A. 构建产物存在
 test -f packages/test-account/lib/index.js &&
 test -f packages/test-account/lib/client.js &&
-test -f packages/browser-use-playwright-mcp-storage/lib/index.js &&
+test -f packages/playwright-mcp-storage/lib/index.js &&
 echo "OK: build artifacts"
 
 # B. profile 依赖齐全 + bundle patch 已挂载（纯读，无副作用）
@@ -95,11 +94,11 @@ DSH_HOME="${DSH_HOME:-$HOME/.dsh}" node -e '
 const fs=require("fs"),path=require("path");
 const home=process.env.DSH_HOME,name=process.argv[1];
 const p=JSON.parse(fs.readFileSync(path.join(home,"profiles",name,"package.json"),"utf8"));
-const need=["@dsh-test-account/test-account","@dsh-test-account/browser-use-playwright-mcp-storage","@deepseek-ai/dsh-browser-use","@deepseek-ai/dsh-experimental-browser-use-runtime"];
+const need=["@dsh-test-account/test-account","@dsh-test-account/playwright-mcp-storage"];
 const missing=need.filter(n=>!p.dependencies||!p.dependencies[n]);
 const bundles=(p.dsh&&p.dsh.profile&&p.dsh.profile.bundles)||[];
 if(missing.length||!bundles.includes("@dsh-test-account/test-account")){console.error("FAIL",{missing,bundles});process.exit(1);}
-console.log("OK: profile",name,"deps=4 bundle-patch=yes");
+console.log("OK: profile",name,"deps=2 bundle-patch=yes");
 ' "$PROFILE"
 
 # C. 类型 + 构建 + 单测 + client bundle 结构（推荐）
@@ -111,7 +110,9 @@ pnpm run verify
 ### 0.5 启动与验收
 
 ```bash
-npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081
+# 0.1.5 线：根命令启动任意 profile（`web` 子命令写死 --profile web）
+dsh --profile test-account --port 3081
+# 没有 dsh 就用 npx -y @deepseek-ai/dsh@0.1.5-rc.3 --profile test-account --port 3081
 # 终端打印带 token 的 URL，形如 http://127.0.0.1:3081/?token=...
 ```
 
@@ -136,7 +137,8 @@ pnpm run smoke:ui "http://127.0.0.1:3081/?token=<token>" -- --home "${DSH_HOME:-
 | `npm error ENOENT ... _npx/<hash>/package.json` | npx 缓存损坏 | `rm -rf ~/.npm/_npx` 后重跑，或 `DSH_BIN="dsh" ./install.sh test-account` |
 | `profile "web" is shipped and cannot be a custom profile target` | 对**已存在**的 profile（尤其 `web` / `acp` / `headless` / `sdk` 这类内置模板名）跑了 `--from-default-profile` | 删掉初始化那一步（`install.sh` 会先判断目录是否存在）；已存在的 profile 直接 `dsh plugin --profile web add …` |
 | `error: web takes none of parent --profile …` | 在 0.1.5 线用 0.1.7 的启动语法 | 0.1.5 的 `web` 子命令写死 `--profile web`；改跑 `dsh --profile <name> --port 3081`（0.1.7 才支持 `<name> web`） |
-| 装 `@deepseek-ai/dsh-browser-use` 失败 | DSH 版本低于 0.1.6 | 用 `DSH_VERSION=0.1.7-alpha.1`；0.1.5 线没有对应的 browser-use 包，只能装 0.1.7-alpha.1（见 §六-6） |
+| profile 里还残留 0.1.7 的 browser-use 栈 | 早期 `install.sh` 装进去的依赖 | 重跑 `./install.sh <profile>`：它会先 `dsh plugin remove` 掉 `@deepseek-ai/dsh-browser-use` / `@deepseek-ai/dsh-experimental-browser-use-runtime` / 旧 provider，再装 0.1.5 线的两个包 |
+| 装依赖时拉到 `0.1.6-alpha` / `0.1.7-alpha` 包 | npm 缓存或旧 lockfile 残留 | 删掉 `node_modules` 与 `pnpm-lock.yaml` 重新 `pnpm install`；本仓库全部锁在 `0.1.5-rc.3` + `cordis 4.0.2` |
 | `Browser "chrome-for-testing" is not installed` | provider 没探测到本机浏览器 | ① 装本机 Chrome / Chromium / Edge（`autoExecutablePath` 默认复用）；或 ② `npx @playwright/mcp install-browser chrome-for-testing`；或 ③ 在 profile 配 `provider.executablePath` |
 | `File access denied ... outside allowed roots` | provider 缺 `--allow-unrestricted-file-access` | 用本仓库的 storage provider；插件会降级 staged，但默认 provider 更稳 |
 | `browser_storage_state 执行失败：ENOENT …/states/xxx.json` | 上游 MCP 只写文件、不建目录（`<store>/states/` 首次保存时还不存在） | 已在插件侧修掉（`browser-storage.ts` 直连前先 `mkdir`）；升级到含该修复的版本 |
@@ -145,8 +147,8 @@ pnpm run smoke:ui "http://127.0.0.1:3081/?token=<token>" -- --home "${DSH_HOME:-
 
 ### 0.7 硬性约束（AI 不要做）
 
-- ❌ 不装 / 不升 `@playwright/mcp`（固定 `0.0.80`），不把 `@deepseek-ai/*` 换成 `latest`（锁 `0.1.7-alpha.1`）；
-- ❌ 不改 DSH 官方包；provider 行为要变就在本仓库 `packages/browser-use-playwright-mcp-storage` 里改；
+- ❌ 不装 / 不升 `@playwright/mcp`（固定 `0.0.80`），不把 `@deepseek-ai/*` 换成 `latest`（锁 `0.1.5-rc.3`，cordis `4.0.2`）；
+- ❌ 不改 DSH 官方包；provider 行为要变就在本仓库 `packages/playwright-mcp-storage` 里改；
 - ❌ 不动别人正在用的 profile / GUI 进程，验证一律用独立 profile 名；
 - ❌ 不写 `postinstall` 去改用户 profile；
 - ❌ 不采集、不存储用户名 / 密码 / 验证码，不做自动登录。
@@ -157,32 +159,31 @@ pnpm run smoke:ui "http://127.0.0.1:3081/?token=<token>" -- --home "${DSH_HOME:-
 plugin: "@dsh-test-account/test-account"
 entry: ./install.sh                 # 唯一推荐入口，幂等
 default_profile: test-account
-dsh_version: 0.1.7-alpha.1
+dsh_version: 0.1.5-rc.3
+cordis_version: 4.0.2
 pnpm_version: 11.9.0
 node_min: "22.18"                   # node --test 直跑 .ts 需要原生 type stripping
 env:
-  DSH_VERSION: "覆盖 DSH 版本"
-  DSH_BIN: "复用已有 dsh 命令，跳过 npx"
+  DSH_VERSION: "npx 回退用的 DSH 版本，默认 0.1.5-rc.3"
+  DSH_BIN: "复用已有 dsh 命令；默认已优先使用 PATH 上的 dsh"
   DSH_HOME: "profile 与账号目录的根，默认 ~/.dsh"
 local_packages:
   - path: packages/test-account
     name: "@dsh-test-account/test-account"
     bundle_patch: cordis.patch.yml  # 安装后自动加入 dsh.profile.bundles
-  - path: packages/browser-use-playwright-mcp-storage
-    name: "@dsh-test-account/browser-use-playwright-mcp-storage"
-extra_packages:
-  - "@deepseek-ai/dsh-browser-use@0.1.7-alpha.1"
-  - "@deepseek-ai/dsh-experimental-browser-use-runtime@0.1.7-alpha.1"
+  - path: packages/playwright-mcp-storage
+    name: "@dsh-test-account/playwright-mcp-storage"
+extra_packages: []                  # 不再依赖 browser-use；provider 直接带 @playwright/mcp
 artifacts:
   - packages/test-account/lib/index.js
   - packages/test-account/lib/client.js
-  - packages/browser-use-playwright-mcp-storage/lib/index.js
+  - packages/playwright-mcp-storage/lib/index.js
 profile_checks:
-  dependencies_present: 4           # 上面 4 个包
+  dependencies_present: 2           # 上面 2 个本地包
   bundles_contains: "@dsh-test-account/test-account"
-start: "npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081"
-start_015: "dsh --profile <name> --port 3081"   # 0.1.5 线的 `web` 子命令不接受 --profile
-note: "目标 profile 已存在时，install.sh 不会执行 --from-default-profile（内置模板名会被拒绝）"
+start: "dsh --profile test-account --port 3081"
+start_npx_fallback: "npx -y @deepseek-ai/dsh@0.1.5-rc.3 --profile test-account --port 3081"
+note: "已存在的 profile 不会执行 --from-default-profile；残留的 0.1.7 browser-use 栈会先被移除"
 verify: "pnpm run verify"
 account_store: "${DSH_HOME:-~/.dsh}/test-accounts"
 ```
@@ -192,7 +193,7 @@ account_store: "${DSH_HOME:-~/.dsh}/test-accounts"
 ```bash
 ./install.sh              # 装进 "test-account" profile（不存在则用 web 模板初始化）
 ./install.sh web          # 装进已有的 web profile（例如正在跑 GUI 的那个）
-DSH_VERSION=0.1.7-alpha.1 ./install.sh ta
+DSH_VERSION=0.1.5-rc.3 ./install.sh ta
 ```
 
 `install.sh` 做四件事：
@@ -200,27 +201,24 @@ DSH_VERSION=0.1.7-alpha.1 ./install.sh ta
 1. 在仓库里 `pnpm install && pnpm run build`；
 2. **仅在目标 profile 还不存在时**从 DSH 自带的 `web` 模板初始化它（已存在则原样保留：`--from-default-profile`
    对 `web` / `acp` / `headless` 这些内置模板名连已存在的 profile 也会拒绝）；
-3. 把四个包装进该 profile：
+3. 把两个本地包装进该 profile（如果 profile 里还有旧的 0.1.7 browser-use 栈，会先 `dsh plugin remove` 掉）：
 
    ```bash
    dsh plugin --profile <name> add \
      packages/test-account \
-     packages/browser-use-playwright-mcp-storage \
-     @deepseek-ai/dsh-browser-use@0.1.7-alpha.1 \
-     @deepseek-ai/dsh-experimental-browser-use-runtime@0.1.7-alpha.1
+     packages/playwright-mcp-storage
    ```
 
 4. `@dsh-test-account/test-account` 声明了 `dsh.bundle.patch`，`dsh plugin add` 会自动把它加进
    profile 的 `dsh.profile.bundles`，因此无需手工改 `cordis.patch.yml`。
 
-启动：
+启动（整个仓库锁在 DSH `0.1.5-rc.3`；0.1.5 的 `web` 子命令写死 `--profile web`，所以用根命令启动任意
+profile）：
 
 ```bash
-# DSH 0.1.7 线
-npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081
-
-# DSH 0.1.5 线：`web` 子命令写死 --profile web，改用根命令启动任意 profile
-dsh --profile <name> --port 3081
+dsh --profile test-account --port 3081
+# 没有 dsh 时：
+npx -y @deepseek-ai/dsh@0.1.5-rc.3 --profile test-account --port 3081
 ```
 
 > **装进正在使用的 profile**（例如 GUI 的 `web`）：`dsh plugin add` 会立刻改 profile 的
@@ -231,7 +229,7 @@ dsh --profile <name> --port 3081
 > **浏览器本体**：provider 默认自动探测本机 Chrome / Chromium / Edge 并复用，所以装了 Chrome 的
 > 机器开箱即用。如果一台机器两者都没有，第一次保存登录态会提示两条出路：跑
 > `npx @playwright/mcp install-browser chrome-for-testing`，或在 profile 里显式配
-> `executablePath`。详见 [`packages/browser-use-playwright-mcp-storage/README.md`](packages/browser-use-playwright-mcp-storage/README.md#浏览器本体)。
+> `executablePath`。详见 [`packages/playwright-mcp-storage/README.md`](packages/playwright-mcp-storage/README.md#浏览器本体)。
 
 ## 二、用起来
 
@@ -291,9 +289,11 @@ packages/
 │   │   ├── AccountForm.tsx                  # 添加 / 编辑表单
 │   │   └── contract.ts                      # 本地声明的 DSH 客户端契约 + RPC 调用
 │   ├── test/                                # node:test 单元测试
-│   └── cordis.patch.yml                     # bundle 补丁：挂载 browser-use + provider + 本插件
-└── browser-use-playwright-mcp-storage/       # 薄 provider
-    └── src/args.ts                          # 参数拼装（--caps=storage 等），可单测
+│   └── cordis.patch.yml                     # bundle 补丁：挂载 provider + 本插件
+└── playwright-mcp-storage/                  # 薄 provider（按 Session 挂 @playwright/mcp）
+    └── src/
+        ├── args.ts                          # 参数拼装（--caps=storage 等），可单测
+        └── session-mcp.ts                   # 每个 live Agent 一个 scoped dsh-mcp-client
 ```
 
 ## 五、配置
@@ -302,11 +302,8 @@ packages/
 
 ```yaml
 - insert:
-    - id: test-account-browser-use
-      name: '@deepseek-ai/dsh-browser-use'
-
     - id: test-account-playwright-mcp
-      name: '@dsh-test-account/browser-use-playwright-mcp-storage'
+      name: '@dsh-test-account/playwright-mcp-storage'
       config:
         mode: launch          # launch | attach
         headless: false       # 手工登录需要看得见浏览器
@@ -339,16 +336,15 @@ packages/
 
 设计文档 `doc/dsh-test-account-plugin-design.md` 有几处和实际 DSH 代码不一致，实现按代码来：
 
-1. **客户端 UI 是 React，不是 Vue。** DSH 0.1.5/0.1.7 的客户端插件运行时是 React 18 + slot 注册 +
+1. **客户端 UI 是 React，不是 Vue。** DSH 0.1.5 的客户端插件运行时是 React 18 + slot 注册 +
    `window.__ModuleLoader__.load` 懒加载 CJS 包，没有 Vue 入口，所以 `AccountPanel.vue` 换成了
    `AccountPanel.tsx`。
 2. **storage 工具确实需要 `--caps=storage`。** `@playwright/mcp@0.0.80` 里 `browser_storage_state` /
    `browser_set_storage_state` 的 capability 是 `storage`，而 `filteredTools()` 只保留
    `core*` 或 `config.capabilities` 里列出的工具。官方
    `@deepseek-ai/dsh-experimental-browser-use-playwright-mcp` 把参数写死成
-   `--browser chromium --isolated`，**没有任何透传口子**（0.1.7-alpha.1 也一样），所以本仓库自带
-   `packages/browser-use-playwright-mcp-storage`：复用官方 `mountSessionMcp`，只多传
-   `--caps=storage`。
+   `--browser chromium --isolated`，**没有任何透传口子**，所以本仓库自带
+   `packages/playwright-mcp-storage`：自己拼 `@playwright/mcp` 参数，只多传 `--caps=storage`。
 3. **别的官方 provider 都拿不到登录态。** 也查了
    `dsh-experimental-browser-use-chrome-devtools-mcp` 和 `stagehand-native`：前者是调试/快照类工具，
    后者只有 `navigate / tabs / screenshot / act / observe / extract`，都没有 storageState 能力。所以
@@ -364,20 +360,18 @@ packages/
    `ctx.connection.fetch.register({ path: '/api/test-account', methods: ['POST'], … })`：它是官方文档里
    给「JSON Remote gateway 不拥有的路由」准备的扩展点，天然走 `/api` 的 Host/Origin 校验与浏览器
    token 鉴权，客户端一个同源 `fetch` 就够了。
-5. **`ctx.browserUse` 仍然只是 provider 注册表**（设计文档 §8.1 正确）：它只有 `register` /
-   `providerName`，没有 `click()` / `setStorageState()`。所以真正调用走
-   `ctx.tools.execute({ name: 'mcp__playwright-mcp__browser_storage_state', agent, ... })`，
-   `agent` 由 `ctx.agents.get(sessionId)` 取得——这就是「复用当前 Session 的浏览器」的落点。
-6. **浏览器版本线（0.1.5 与 0.1.7 混装是可行的）。** Browser Use 系列包 npm 上最低
-   `0.1.6-alpha.1`，peer 依赖要求 `0.1.7-alpha.1`：`0.1.5` 线上**没有**对应的 browser-use 包，
-   所以哪怕宿主是 0.1.5，也只能装 `0.1.7-alpha.1` 的 browser-use。混装不会把 0.1.7 的运行时塞进
-   profile：这两个包把 DSH 运行时声明成 peer/外部依赖，`dsh-browser-use` 只有
-   `@deepseek-ai/dsh-brand` 与 `cordis` 两个 peer，其余走 profile 的 module fallback 解析到宿主
-   那一份闭包（本次实测 `~/.dsh/profiles/web/node_modules/@deepseek-ai/` 只多了
-   `dsh-browser-use` / `dsh-experimental-browser-use-runtime` 两个包，没有 0.1.7 的
-   `dsh-base`/`dsh-tools` 副本）。已在 GUI 同款的 **0.1.5-rc.3** profile 上端到端验证：面板 9/9、
-   `saveState`→MCP→真 Chrome→落盘、`use`/`current` 全通。开发仍建议用独立 profile（见 `install.sh`），
-   但把插件装进正在用的 `web` profile 是可用的。
+5. **真正调用走 `ctx.tools.execute`。** 浏览器工具名是 `mcp__playwright-mcp__browser_storage_state` /
+   `mcp__playwright-mcp__browser_set_storage_state`，`agent` 由 `ctx.agents.get(sessionId)` 取得——
+   这就是「复用当前 Session 的浏览器」的落点。插件不碰任何浏览器 API，只把这一个工具调用转发出去。
+6. **不再依赖 DSH Browser Use，`@playwright/mcp` 直挂。** `@deepseek-ai/dsh-browser-use` 与
+   `@deepseek-ai/dsh-experimental-browser-use-runtime` npm 上最低只有 `0.1.6-alpha.1`（0.1.5 线没有），
+   且官方 Playwright provider 的参数写死。于是 provider 改用 0.1.5 线自带的
+   `@deepseek-ai/dsh-mcp-client`：监听 `agent/created`，用 `createScope(ctx, agent)` 给每个 live Agent
+   开一个作用域，在作用域里挂一个 `@playwright/mcp` 子进程（stdio）。每个 Session 因此各有一套浏览器和
+   一套 `mcp__playwright-mcp__*` 工具名；Agent 结束或插件卸载时 dispose 作用域、关掉子进程；
+   `tools/execute` 上还有一道守卫，别的 Session 调不到这套工具。`attach` 模式独占（同一时刻只服务一个
+   live Session）。整套依赖因此只剩 `0.1.5-rc.3` + `cordis 4.0.2` + `schemastery 3.18.2`，图里没有任何
+   0.1.6 / 0.1.7 包（`grep '0\.1\.7-alpha' pnpm-lock.yaml` 为空）。
 7. **上游 storage 工具只写文件、不建目录。** `browser_storage_state` 拿到 `filename` 后直接
    `open(...,'w')`，父目录不存在就抛 `ENOENT`；而账号目录里的 `states/` 只有在写过一次登录态之后
    才有。所以 `browser-storage.ts` 在 `direct` 直连前先 `mkdir(dirname(access.path), {recursive:true})`，
@@ -415,21 +409,21 @@ pnpm run verify        # 以上全跑，并做 client bundle 结构检查
 | 单元 | 浏览器桥：direct、**缺失的落盘目录会被创建**、工作区被拒后自动降级 staged、工具缺失/失败错误码、缺浏览器的提示 | ✅ 13 项，用模拟的工作区文件栅栏 |
 | 单元 | 插件接线：路由注册、三个 Agent 工具注册、`agentTools: false` 不注册、路由增删查与错误码 | ✅ 5 项（假 Cordis ctx） |
 | 构建 | `lib/client.js` 真的是 `window.__ModuleLoader__.load` 懒加载包 | ✅ `scripts/check-bundle.mjs` |
-| 集成 | `./install.sh <profile>` 在全新 `DSH_HOME` 上从零跑通：构建 → 初始化 profile → 装 4 个包 → 自动加入 `dsh.profile.bundles` → 能启动 | ✅ 脚本本身已实测 |
-| 集成 | 0.1.7-alpha.1 profile 装载三个插件，无未激活项；boot manifest 含本插件与四个 client 依赖；`/plugins/??…/client.js` 返回 200 | ✅ 独立 `DSH_HOME` |
+| 集成 | `./install.sh <profile>` 在全新 `DSH_HOME` 上从零跑通：构建 → 初始化 profile → 装 2 个包 → 自动加入 `dsh.profile.bundles` → 能启动 | ✅ 脚本本身已实测 |
+| 集成 | 0.1.5-rc.3 profile 装载两个插件，无未激活项；boot manifest 含本插件与四个 client 依赖；`/plugins/??…/client.js` 返回 200 | ✅ 独立 `DSH_HOME` |
 | 集成 | `POST /api/test-account` 真实 HTTP + 鉴权：增删改查、持久化、全部错误码、`session-not-live` 守卫 | ✅ curl 走完整流程 |
 | 集成 | `@playwright/mcp` 带 `--caps=storage` 时工具数为 41 且包含两个 storage 工具；不带时 24 且没有 | ✅ 直接起 MCP server 列工具 |
 | 集成 | 真实 Chrome：`browser_storage_state` 把登录态写到工作区外的账号目录（含 `cookies` / `origins`），`browser_set_storage_state` 再读回；去掉 `--allow-unrestricted-file-access` 时同路径被 `File access denied … outside allowed roots` 拒绝 | ✅ 正是降级路径存在的理由 |
 | 集成 | **整条链路**：真实浏览器里打开面板 → 路由 `accounts/saveState` → DSH `ctx.tools.execute('mcp__playwright-mcp__browser_storage_state')` → Playwright MCP → 真实 Chrome → 账号目录落盘；再 `accounts/use` 恢复并更新当前账号 | ✅ `pnpm run smoke:ui <url> --home <DSH_HOME>` 17/17 通过，无 page error |
-| 集成 | 同一套插件装进**宿主为 0.1.5-rc.3** 的 profile（browser-use 仍为 0.1.7-alpha.1）：面板冒烟 9/9；再用确定性 Session id 走 `accounts/saveState` / `use` / `current`，真 Chrome 落盘 36 字节合法 storageState | ✅ 独立 `ta-webcheck` 实例 + curl（见 §六-6） |
+| 集成 | 整套依赖锁在 0.1.5 线：`pnpm-lock.yaml` 里 `0.1.6-alpha` / `0.1.7-alpha` 出现 0 次，`cordis` 只有 4.0.2，provider 的 `node_modules` 只解析出 `0.1.5-rc.3` | ✅ `grep` + `node_modules` 实测 |
 | 集成 | 上面这套在三种装法下都跑过：`install.sh` 新建的 profile、已初始化过的 profile、以及不配 `executablePath`（靠自动探测本机 Chrome） | ✅ |
-| 手工 | 图形浏览器里「登录 → 保存登录态 → 换账号 → 恢复」；以及设计文档 §14 的风险项：两个 Session 同时各起一个浏览器、各自切账号互不干扰 | ⏳ 需要人手动登录；浏览器资源是 DSH provider 的职责，不该在本插件里绕过 |
+| 手工 | 图形浏览器里「登录 → 保存登录态 → 换账号 → 恢复」；以及设计文档 §14 的风险项：两个 Session 同时各起一个浏览器、各自切账号互不干扰 | ⏳ 需要人手动登录；浏览器资源是 provider 的职责，不该在本插件里绕过 |
 
 `scripts/smoke-ui.mjs` 需要一个已经跑起来的实例：
 
 ```bash
 ./install.sh test-account
-npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081   # 记下打印的带 token URL
+dsh --profile test-account --port 3081   # 记下打印的带 token URL
 
 # 只验面板（不需要浏览器本体）
 pnpm run smoke:ui "http://127.0.0.1:3081/?token=..."
@@ -448,7 +442,7 @@ pnpm run smoke:ui "http://127.0.0.1:3081/?token=..." -- --home ~/.dsh
 
 ```bash
 ./install.sh test-account
-npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081
+dsh --profile test-account --port 3081
 # 新开 Session → 右侧栏「测试账号」→ 添加账号 → 浏览器登录 → 保存当前登录态
 # 再点「使用账号」→ 刷新业务页面应仍是登录态
 ```

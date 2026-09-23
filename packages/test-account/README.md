@@ -5,16 +5,15 @@
 - **Host 半**（`lib/index.js`）：`accounts.json` / `states/*.json` 的读写、Session→账号记忆、
   `/api/test-account` 这条已鉴权的 Fetch 路由。
 - **Client 半**（`lib/client.js`）：右侧栏「测试账号」页面类型、面板 UI、对话头部快捷入口。
-- **bundle 补丁**（`cordis.patch.yml`）：挂载 `@deepseek-ai/dsh-browser-use`、本仓库的 storage
-  provider，以及本插件自身。
+- **bundle 补丁**（`cordis.patch.yml`）：挂载本仓库的 storage provider，以及本插件自身。
 
 它不启动浏览器、不存密码、不做自动登录；浏览器操作全部转发给当前 Session 已经持有的
-Playwright MCP 工具。
+Playwright MCP 工具（由 `@dsh-test-account/playwright-mcp-storage` 按 Session 挂载）。
 
 ## 安装
 
-本包不是独立安装的：它是 `dsh.bundle.patch` 的载体，必须和 storage provider、两个官方 browser-use
-包一起装进同一个 DSH profile，否则面板、路由和浏览器工具都不完整。用仓库根的 `install.sh` 一次装好：
+本包不是独立安装的：它是 `dsh.bundle.patch` 的载体，必须和 storage provider 一起装进同一个
+DSH profile，否则面板、路由和浏览器工具都不完整。用仓库根的 `install.sh` 一次装好：
 
 ```bash
 ./install.sh test-account        # 默认 profile；详见根 README「零、AI 安装引导（Agent 执行清单）」
@@ -69,7 +68,7 @@ interface Config {
 | `account_current` | — | 查询本 Session 当前使用哪个账号 |
 
 这样「当前 Session 正在用哪个账号」对人和对 Agent 是同一份事实，Agent 也能按指定身份继续
-Browser Use / E2E / 排障，而不是要人在对话里额外说明。
+浏览器操作 / E2E / 排障，而不是要人在对话里额外说明。
 
 安全性：`account_use` 只恢复已经由人手动登录并保存过的 `storageState`，插件本身既不接收也不
 存储任何凭据；工具描述也明确要求调用后重新导航确认身份，不假设当前页面已刷新。

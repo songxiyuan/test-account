@@ -41,7 +41,7 @@ if (url === undefined) {
 const homeIndex = process.argv.indexOf('--home')
 const dshHome = homeIndex < 0 ? undefined : process.argv[homeIndex + 1]
 
-const packageDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'packages', 'browser-use-playwright-mcp-storage')
+const packageDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'packages', 'playwright-mcp-storage')
 const require = createRequire(join(packageDir, 'package.json'))
 const mcpRequire = createRequire(require.resolve('@playwright/mcp/package.json'))
 const { chromium } = mcpRequire('playwright-core')

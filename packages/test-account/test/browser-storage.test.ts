@@ -244,7 +244,7 @@ test('a missing storage tool is an actionable setup error', async () => {
     await assert.rejects(bridge.save(fakeAgent(workspace), access(join(store, 'x.json')), new AbortController().signal), (error: unknown) => {
       assert.ok(error instanceof BrowserStorageError)
       assert.equal(error.code, 'browser-tool-unavailable')
-      assert.match(error.message, /browser-use-playwright-mcp-storage/u)
+      assert.match(error.message, /playwright-mcp-storage/u)
       return true
     })
   })

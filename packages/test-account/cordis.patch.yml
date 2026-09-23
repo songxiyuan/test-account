@@ -1,12 +1,11 @@
 - insert:
-    - id: test-account-browser-use
-      name: '@deepseek-ai/dsh-browser-use'
-
-    # Replaces the shipped Playwright MCP provider: same session lifecycle, plus
-    # --caps=storage so browser_storage_state / browser_set_storage_state exist.
-    # A deployment may mount only one browser-use provider at a time.
+    # Mounts the upstream @playwright/mcp server itself, once per live Session,
+    # through @deepseek-ai/dsh-mcp-client. DSH's browser-use stack only exists on
+    # the 0.1.6+ line and pins the server arguments, so --caps=storage (and with
+    # it browser_storage_state / browser_set_storage_state) never reaches an
+    # Agent there. This provider adds exactly that switch.
     - id: test-account-playwright-mcp
-      name: '@dsh-test-account/browser-use-playwright-mcp-storage'
+      name: '@dsh-test-account/playwright-mcp-storage'
       config:
         mode: launch
         # Saving a login state needs a human to log in, so the window stays visible.

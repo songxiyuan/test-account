@@ -1,29 +1,35 @@
-# @dsh-test-account/browser-use-playwright-mcp-storage
+# @dsh-test-account/playwright-mcp-storage
 
-带 upstream `storage` 能力的 Playwright MCP browser provider。
+带 upstream `storage` 能力的 Playwright MCP browser provider，按 Session 直接挂载
+`@playwright/mcp`，不依赖 DSH Browser Use。
 
 ## 为什么需要它
 
-`@playwright/mcp@0.0.80` 里 `browser_storage_state` / `browser_set_storage_state` /
-`browser_cookie_*` / `browser_localstorage_*` 等工具的 `capability` 都是 `storage`，而
-`filteredTools(config)` 只保留：
+两个独立的问题合在一起，逼出了这个包：
 
-```js
-tool.capability.startsWith('core') || config.capabilities?.includes(tool.capability)
-```
+1. **storage 能力默认关闭。** `@playwright/mcp@0.0.80` 里 `browser_storage_state` /
+   `browser_set_storage_state` / `browser_cookie_*` / `browser_localstorage_*` 等工具的
+   `capability` 都是 `storage`，而 `filteredTools(config)` 只保留：
 
-`config.capabilities` 来自 CLI 的 `--caps`。而官方 provider
-（`@deepseek-ai/dsh-experimental-browser-use-playwright-mcp`）把参数写死为
-`--browser chromium --isolated`（attach 模式再加 `--cdp-endpoint`），配置 schema 里没有
-capabilities / 透传参数的口子，所以官方 provider 下这两个工具**根本不会出现在工具目录里**。
+   ```js
+   tool.capability.startsWith('core') || config.capabilities?.includes(tool.capability)
+   ```
 
-本包复用官方同一个 session 生命周期（`@deepseek-ai/dsh-experimental-browser-use-runtime/mcp`
-的 `mountSessionMcp`），只改进程参数。
+   `config.capabilities` 来自 CLI 的 `--caps`。
+
+2. **DSH 官方 browser-use 栈不在 0.1.5 线上。** `@deepseek-ai/dsh-browser-use` /
+   `@deepseek-ai/dsh-experimental-browser-use-runtime` npm 上最低只有 `0.1.6-alpha.1`，
+   而且官方 Playwright provider（`@deepseek-ai/dsh-experimental-browser-use-playwright-mcp`）
+   把参数写死成 `--browser chromium --isolated`（attach 再加 `--cdp-endpoint`），没有透传口子。
+
+本包因此**不注册 `ctx.browserUse`**，而是用 0.1.5 线自带的 `@deepseek-ai/dsh-mcp-client`
+在**每个 live Agent 的 scope 里**各挂一个 `@playwright/mcp` 进程：每个 Session 一套浏览器、
+一套 `mcp__playwright-mcp__*` 工具名，天然隔离。
 
 ## 安装
 
-不要单独装本包：它必须和 `@dsh-test-account/test-account` 一起进同一个 profile，且**一个部署只能挂一个
-browser provider**（见下文）。用仓库根的 `install.sh` 一次装好：
+不要单独装本包：它必须和 `@dsh-test-account/test-account` 一起进同一个 profile。用仓库根的
+`install.sh` 一次装好：
 
 ```bash
 ./install.sh test-account        # 默认 profile；详见根 README「零、AI 安装引导（Agent 执行清单）」
@@ -61,6 +67,17 @@ interface Config {
 `attach` 不能带 `endpoint` 以外的 launch 参数，`launch` 不能带 `endpoint`；不合法组合在占用任何浏览器
 资源之前就会抛错。这些规则有单元测试。
 
+## 挂载模型
+
+- 监听 `agent/created`，为每个 live Agent 用 `createScope(ctx, agent)` 起一个作用域，在作用域里
+  `ctx.plugin(McpClient, …)`，stdio 传输、`failOnStartupError: true`、不自动重连。
+- Agent 结束或插件卸载时 dispose 该作用域，stdio 子进程随之关闭。
+- `tools/execute` 上有一道守卫：`mcp__playwright-mcp__*`（以及指向本 server 的 MCP resource 工具）
+  只有该 Agent 自己能调，别的 Session 调用会报
+  `playwright-mcp-storage: browser tool belongs to another Session`。
+- `attach` 模式是独占的：同一时刻只让一个 live Session 拿到外部浏览器，其余 Session 正常启动但没有
+  浏览器工具。
+
 ## 浏览器本体
 
 钉住的 `@playwright/mcp@0.0.80` 默认要 `chrome-for-testing`（Playwright 自己那份 Chromium），
@@ -84,15 +101,10 @@ Run `npx @playwright/mcp install-browser chrome-for-testing` to install
 探测不到（例如干净的 CI）就回退到 Playwright 自带浏览器，并打一条 warn 提示两条出路。想强制用自带
 Chromium：`autoExecutablePath: false` + `npx @playwright/mcp install-browser chrome-for-testing`。
 
-## 一个部署只能挂一个 browser provider
-
-`ctx.browserUse` 是「具名独占槽位」：重复注册会拿已注册的名字报错。所以要用本包，就**不要**再挂
-`@deepseek-ai/dsh-experimental-browser-use-playwright-mcp`。
-
 ## 测试
 
 ```bash
-pnpm --filter @dsh-test-account/browser-use-playwright-mcp-storage test
+pnpm --filter @dsh-test-account/playwright-mcp-storage test
 ```
 
 `test/args.test.ts` 覆盖默认参数、`--headless` 省略、权限开关、`--caps` 拼接与省略、
