@@ -44,7 +44,7 @@ mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
 ./install.sh test-account                                   # 默认 profile：test-account
 ./install.sh web                                            # 装进已有 profile（示例）
 DSH_VERSION=0.1.7-alpha.1 ./install.sh test-account         # 钉住 DSH 版本
-DSH_BIN="dsh" ./install.sh test-account                     # 用 PATH 上已有的 dsh，跳过 npx
+DSH_BIN="dsh" ./install.sh web                              # 用 PATH 上已有的 dsh（例如正在跑 GUI 的那一个）
 ```
 
 `install.sh` 依次做四件事：
@@ -52,9 +52,12 @@ DSH_BIN="dsh" ./install.sh test-account                     # 用 PATH 上已有
 | 步 | 动作 | 成功信号 |
 | --- | --- | --- |
 | 1 | 仓库内 `pnpm install && pnpm run build` | 生成 `packages/test-account/lib/{index.js,client.js}` 与 provider 的 `lib/index.js` |
-| 2 | 从 DSH 自带 `web` 模板初始化目标 profile | 不存在则创建；已存在则跳过（不会重置） |
+| 2 | 目标 profile **不存在时**才从 DSH 自带 `web` 模板初始化 | 已存在则打印 `already exists; leaving it untouched`（不会重置） |
 | 3 | `dsh plugin add` 4 个包 | 打印安装结果，结尾无 `error` |
 | 4 | 把本插件写进 `dsh.profile.bundles` | 由 `dsh.bundle.patch` 自动完成，见 §0.4-B |
+
+> 第 2 步必须按目录存在与否判断：`--from-default-profile` 连已存在的 profile 也会拒绝内置模板名
+> （`web` / `acp` / `headless` / `sdk`），所以无条件执行会让 `./install.sh web` 直接失败。
 
 ### 0.3 手工分步（`install.sh` 不可用时，与 §0.2 等价）
 
@@ -63,7 +66,8 @@ DSH_BIN="dsh" ./install.sh test-account                     # 用 PATH 上已有
 pnpm install
 pnpm run build
 
-# 2) 初始化 profile（已存在时 --dump-config 直接退出，不会重置）
+# 2) 仅当目标 profile 还不存在时初始化（已存在就跳过这一步，别对 web 这类内置模板名执行）
+test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
 npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account \
   --from-default-profile web --dump-config >/dev/null
 
@@ -130,10 +134,13 @@ pnpm run smoke:ui "http://127.0.0.1:3081/?token=<token>" -- --home "${DSH_HOME:-
 | --- | --- | --- |
 | `pnpm: command not found` | 未装 pnpm | `corepack enable && corepack prepare pnpm@11.9.0 --activate` |
 | `npm error ENOENT ... _npx/<hash>/package.json` | npx 缓存损坏 | `rm -rf ~/.npm/_npx` 后重跑，或 `DSH_BIN="dsh" ./install.sh test-account` |
-| 装 `@deepseek-ai/dsh-browser-use` 失败 | DSH 版本低于 0.1.7 | 用 `DSH_VERSION=0.1.7-alpha.1` 且换一个新的 profile 名，别动正在用的 profile |
+| `profile "web" is shipped and cannot be a custom profile target` | 对**已存在**的 profile（尤其 `web` / `acp` / `headless` / `sdk` 这类内置模板名）跑了 `--from-default-profile` | 删掉初始化那一步（`install.sh` 会先判断目录是否存在）；已存在的 profile 直接 `dsh plugin --profile web add …` |
+| `error: web takes none of parent --profile …` | 在 0.1.5 线用 0.1.7 的启动语法 | 0.1.5 的 `web` 子命令写死 `--profile web`；改跑 `dsh --profile <name> --port 3081`（0.1.7 才支持 `<name> web`） |
+| 装 `@deepseek-ai/dsh-browser-use` 失败 | DSH 版本低于 0.1.6 | 用 `DSH_VERSION=0.1.7-alpha.1`；0.1.5 线没有对应的 browser-use 包，只能装 0.1.7-alpha.1（见 §六-6） |
 | `Browser "chrome-for-testing" is not installed` | provider 没探测到本机浏览器 | ① 装本机 Chrome / Chromium / Edge（`autoExecutablePath` 默认复用）；或 ② `npx @playwright/mcp install-browser chrome-for-testing`；或 ③ 在 profile 配 `provider.executablePath` |
 | `File access denied ... outside allowed roots` | provider 缺 `--allow-unrestricted-file-access` | 用本仓库的 storage provider；插件会降级 staged，但默认 provider 更稳 |
-| 面板里找不到「测试账号」 | Session 还没有 turn，或插件没进 `dsh.profile.bundles` | 先发一条消息；再跑 §0.4-B |
+| `browser_storage_state 执行失败：ENOENT …/states/xxx.json` | 上游 MCP 只写文件、不建目录（`<store>/states/` 首次保存时还不存在） | 已在插件侧修掉（`browser-storage.ts` 直连前先 `mkdir`）；升级到含该修复的版本 |
+| 面板里找不到「测试账号」 | Session 还没有 turn，或插件没进 `dsh.profile.bundles` | 先发一条消息；再跑 §0.4-B。装进**正在运行**的 profile 后必须重启该 DSH 进程才生效 |
 | 报 `session-not-live` | 拿别的 Session 的 id 调浏览器 | 在同一个 Session 内操作 |
 
 ### 0.7 硬性约束（AI 不要做）
@@ -174,6 +181,8 @@ profile_checks:
   dependencies_present: 4           # 上面 4 个包
   bundles_contains: "@dsh-test-account/test-account"
 start: "npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081"
+start_015: "dsh --profile <name> --port 3081"   # 0.1.5 线的 `web` 子命令不接受 --profile
+note: "目标 profile 已存在时，install.sh 不会执行 --from-default-profile（内置模板名会被拒绝）"
 verify: "pnpm run verify"
 account_store: "${DSH_HOME:-~/.dsh}/test-accounts"
 ```
@@ -182,14 +191,15 @@ account_store: "${DSH_HOME:-~/.dsh}/test-accounts"
 
 ```bash
 ./install.sh              # 装进 "test-account" profile（不存在则用 web 模板初始化）
-./install.sh web          # 装进已有的 web profile
+./install.sh web          # 装进已有的 web profile（例如正在跑 GUI 的那个）
 DSH_VERSION=0.1.7-alpha.1 ./install.sh ta
 ```
 
 `install.sh` 做四件事：
 
 1. 在仓库里 `pnpm install && pnpm run build`；
-2. 从 DSH 自带的 `web` 模板初始化目标 profile（已存在则跳过）；
+2. **仅在目标 profile 还不存在时**从 DSH 自带的 `web` 模板初始化它（已存在则原样保留：`--from-default-profile`
+   对 `web` / `acp` / `headless` 这些内置模板名连已存在的 profile 也会拒绝）；
 3. 把四个包装进该 profile：
 
    ```bash
@@ -206,8 +216,17 @@ DSH_VERSION=0.1.7-alpha.1 ./install.sh ta
 启动：
 
 ```bash
+# DSH 0.1.7 线
 npx -y @deepseek-ai/dsh@0.1.7-alpha.1 --profile test-account web --port 3081
+
+# DSH 0.1.5 线：`web` 子命令写死 --profile web，改用根命令启动任意 profile
+dsh --profile <name> --port 3081
 ```
+
+> **装进正在使用的 profile**（例如 GUI 的 `web`）：`dsh plugin add` 会立刻改 profile 的
+> `package.json` / lockfile，但 `dsh.profile.bundles` 只在进程启动时合成，所以**必须重启那个 DSH
+> 进程**面板才会出现；launchd 托管的 GUI 用 `launchctl kickstart -k gui/$(id -u)/com.nomis.dsh-web`。
+> 回滚：恢复 `~/.dsh/profiles/<name>/{package.json,pnpm-lock.yaml}` 后重跑 `dsh plugin --profile <name> install`。
 
 > **浏览器本体**：provider 默认自动探测本机 Chrome / Chromium / Edge 并复用，所以装了 Chrome 的
 > 机器开箱即用。如果一台机器两者都没有，第一次保存登录态会提示两条出路：跑
@@ -349,9 +368,20 @@ packages/
    `providerName`，没有 `click()` / `setStorageState()`。所以真正调用走
    `ctx.tools.execute({ name: 'mcp__playwright-mcp__browser_storage_state', agent, ... })`，
    `agent` 由 `ctx.agents.get(sessionId)` 取得——这就是「复用当前 Session 的浏览器」的落点。
-6. **浏览器版本线。** Browser Use 系列包 npm 上最低 `0.1.6-alpha.1`，peer 依赖要求 `0.1.7-alpha.1`；
-   当前机器上正在跑的 GUI 是 `0.1.5-rc.1`，**装不上 Browser Use**。因此插件按 `0.1.7-alpha.1` 开发，
-   并建议用独立 profile（见 `install.sh`），不要动正在用的 `web` profile。
+6. **浏览器版本线（0.1.5 与 0.1.7 混装是可行的）。** Browser Use 系列包 npm 上最低
+   `0.1.6-alpha.1`，peer 依赖要求 `0.1.7-alpha.1`：`0.1.5` 线上**没有**对应的 browser-use 包，
+   所以哪怕宿主是 0.1.5，也只能装 `0.1.7-alpha.1` 的 browser-use。混装不会把 0.1.7 的运行时塞进
+   profile：这两个包把 DSH 运行时声明成 peer/外部依赖，`dsh-browser-use` 只有
+   `@deepseek-ai/dsh-brand` 与 `cordis` 两个 peer，其余走 profile 的 module fallback 解析到宿主
+   那一份闭包（本次实测 `~/.dsh/profiles/web/node_modules/@deepseek-ai/` 只多了
+   `dsh-browser-use` / `dsh-experimental-browser-use-runtime` 两个包，没有 0.1.7 的
+   `dsh-base`/`dsh-tools` 副本）。已在 GUI 同款的 **0.1.5-rc.3** profile 上端到端验证：面板 9/9、
+   `saveState`→MCP→真 Chrome→落盘、`use`/`current` 全通。开发仍建议用独立 profile（见 `install.sh`），
+   但把插件装进正在用的 `web` profile 是可用的。
+7. **上游 storage 工具只写文件、不建目录。** `browser_storage_state` 拿到 `filename` 后直接
+   `open(...,'w')`，父目录不存在就抛 `ENOENT`；而账号目录里的 `states/` 只有在写过一次登录态之后
+   才有。所以 `browser-storage.ts` 在 `direct` 直连前先 `mkdir(dirname(access.path), {recursive:true})`，
+   否则「新账号第一次保存登录态」必然失败（有单测 `direct save creates a missing destination directory` 覆盖）。
 
 ### 文件访问权限的取舍
 
@@ -379,10 +409,10 @@ pnpm run verify        # 以上全跑，并做 client bundle 结构检查
 
 | 层级 | 内容 | 结论 |
 | --- | --- | --- |
-| 单元 | `account-store`：读写、id 校验、去重、清空可选字段、路径越界、脏 JSON | ✅ 12 项 |
+| 单元 | `account-store`：读写、id 校验、去重、清空可选字段、路径越界、脏 JSON | ✅ 11 项 |
 | 单元 | provider 参数拼装、launch/attach 校验、系统浏览器探测与 `--executable-path` | ✅ 15 项 |
 | 单元 | `AccountService`：保存/恢复、`session-not-live`、`state-missing`、删除清理记账、**两个 Session 各持一个账号互不覆盖**（§11.5） | ✅ 8 项（假 bridge + 假 Agent 注册表） |
-| 单元 | 浏览器桥：direct、工作区被拒后自动降级 staged、工具缺失/失败错误码、缺浏览器的提示 | ✅ 11 项，用模拟的工作区文件栅栏 |
+| 单元 | 浏览器桥：direct、**缺失的落盘目录会被创建**、工作区被拒后自动降级 staged、工具缺失/失败错误码、缺浏览器的提示 | ✅ 13 项，用模拟的工作区文件栅栏 |
 | 单元 | 插件接线：路由注册、三个 Agent 工具注册、`agentTools: false` 不注册、路由增删查与错误码 | ✅ 5 项（假 Cordis ctx） |
 | 构建 | `lib/client.js` 真的是 `window.__ModuleLoader__.load` 懒加载包 | ✅ `scripts/check-bundle.mjs` |
 | 集成 | `./install.sh <profile>` 在全新 `DSH_HOME` 上从零跑通：构建 → 初始化 profile → 装 4 个包 → 自动加入 `dsh.profile.bundles` → 能启动 | ✅ 脚本本身已实测 |
@@ -391,6 +421,7 @@ pnpm run verify        # 以上全跑，并做 client bundle 结构检查
 | 集成 | `@playwright/mcp` 带 `--caps=storage` 时工具数为 41 且包含两个 storage 工具；不带时 24 且没有 | ✅ 直接起 MCP server 列工具 |
 | 集成 | 真实 Chrome：`browser_storage_state` 把登录态写到工作区外的账号目录（含 `cookies` / `origins`），`browser_set_storage_state` 再读回；去掉 `--allow-unrestricted-file-access` 时同路径被 `File access denied … outside allowed roots` 拒绝 | ✅ 正是降级路径存在的理由 |
 | 集成 | **整条链路**：真实浏览器里打开面板 → 路由 `accounts/saveState` → DSH `ctx.tools.execute('mcp__playwright-mcp__browser_storage_state')` → Playwright MCP → 真实 Chrome → 账号目录落盘；再 `accounts/use` 恢复并更新当前账号 | ✅ `pnpm run smoke:ui <url> --home <DSH_HOME>` 17/17 通过，无 page error |
+| 集成 | 同一套插件装进**宿主为 0.1.5-rc.3** 的 profile（browser-use 仍为 0.1.7-alpha.1）：面板冒烟 9/9；再用确定性 Session id 走 `accounts/saveState` / `use` / `current`，真 Chrome 落盘 36 字节合法 storageState | ✅ 独立 `ta-webcheck` 实例 + curl（见 §六-6） |
 | 集成 | 上面这套在三种装法下都跑过：`install.sh` 新建的 profile、已初始化过的 profile、以及不配 `executablePath`（靠自动探测本机 Chrome） | ✅ |
 | 手工 | 图形浏览器里「登录 → 保存登录态 → 换账号 → 恢复」；以及设计文档 §14 的风险项：两个 Session 同时各起一个浏览器、各自切账号互不干扰 | ⏳ 需要人手动登录；浏览器资源是 DSH provider 的职责，不该在本插件里绕过 |
 

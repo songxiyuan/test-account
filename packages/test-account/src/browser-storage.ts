@@ -178,6 +178,11 @@ export class BrowserStorageBridge {
   async save(agent: Agent, access: StorageFileAccess, signal: AbortSignal): Promise<void> {
     this.requireTool(agent, this.saveToolName)
     if (this.options.stateAccess === 'direct') {
+      // The upstream tool writes the file itself and does not create parent
+      // directories, so a first save into `<store>/states/` would fail with
+      // ENOENT even though the account exists. The bridge owns the hand-off of
+      // this path, so it makes sure the destination directory is there first.
+      await mkdir(dirname(access.path), { recursive: true })
       try {
         await this.invoke(agent, this.saveToolName, access.path, signal)
         return

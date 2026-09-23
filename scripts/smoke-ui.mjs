@@ -74,10 +74,11 @@ function newestSessionId(home) {
  * Record and report one assertion.
  * @param label - what was asserted.
  * @param ok - the outcome.
+ * @param detail - extra context printed on failure, usually the error payload.
  */
-function check(label, ok) {
+function check(label, ok, detail = '') {
   checks.push([label, ok])
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`)
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${!ok && detail !== '' ? ` — ${detail}` : ''}`)
 }
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true })

@@ -37,8 +37,13 @@ doc/dsh-test-account-plugin-design.md          # 原始设计方案（只读参�
 - 目标 DSH：`0.1.7-alpha.1`（Browser Use 系列 npm 上最低 `0.1.6-alpha.1`，peer 要求 `0.1.7`）。
 - `@playwright/mcp` 固定 `0.0.80`，与官方 provider 一致，**不要**单独升级。
 - 所有 `@deepseek-ai/*` 依赖锁在 `0.1.7-alpha.1`，不要用 `latest`。
-- 本机可能同时存在别的 DSH 版本（例如 GUI 跑的 `0.1.5-rc.1`）。开发与验证用独立 profile，
-  **不要**升级或重启别人正在用的 profile / GUI 进程。
+- 本机 GUI（`dsh web --port 3080`，launchd 标签 `com.nomis.dsh-web`）跑的是**全局 0.1.5-rc.3** + profile `web`；
+  本插件已经装进该 profile，但 `dsh.profile.bundles` 只在启动时合成，改完要重启 GUI 才生效。
+  0.1.5 线 npm 上没有 browser-use 包，所以宿主 0.1.5 + browser-use `0.1.7-alpha.1` 是**预期混装**：
+  该包把 DSH 运行时留成 peer，实际解析走 profile module fallback 到宿主闭包，不会产生 0.1.7 运行时副本。
+- 开发与验证一律用独立 profile（或独立 `DSH_HOME`）；**不要**在没被要求时重启别人正在用的 profile / GUI 进程。
+- 两代 CLI 语法不同：0.1.5 的 `dsh web` 写死 `--profile web`（不接受 `--profile`），启动任意 profile 用
+  `dsh --profile <name> --port <port>`；0.1.7 才支持 `dsh --profile <name> web --port <port>`。
 
 ## 关键技术约束（改代码前先读）
 
@@ -83,6 +88,9 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
 - 改动跨层链路（路由 / 工具执行 / provider 参数）后，除了单测还应跑一次真机冒烟：
   起一个 profile，然后 `node scripts/smoke-ui.mjs "<带 token URL>" --home <DSH_HOME>`，
   它覆盖「面板 → 路由 → ctx.tools.execute → MCP → 真 Chrome → 落盘 → 恢复」整条链路。
+- `smoke-ui.mjs` 的 `--home` 段靠「最新 session 目录」定位 Session：同一个 `DSH_HOME` 里还有别的
+  实例在写 sessions 时会挑错，报 `session-not-live`。要么用一个全新 `DSH_HOME`（记住它需要先选工作区
+  才能建 Session），要么先只跑面板段、再用 `comm` 差出新建的 session id 手工调 `accounts/saveState`。
 
 ## 安装约定
 

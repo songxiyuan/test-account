@@ -159,6 +159,25 @@ test('direct mode saves straight into the account store', async () => {
   })
 })
 
+test('direct save creates a missing destination directory', async () => {
+  await withDirs(async (workspace, store) => {
+    const calls: RecordedCall[] = []
+    // `<store>/states` does not exist yet, exactly like a freshly created account
+    // directory, and the upstream tool would fail with ENOENT on its own.
+    const target = join(store, 'states', 'vip-us.json')
+    const bridge = new BrowserStorageBridge(fakeHost([workspace, store], calls), {
+      provider: 'playwright-mcp',
+      stateAccess: 'direct',
+      stagePrefix: '.stage-',
+      toolTimeoutMs: 5_000,
+    })
+    await bridge.save(fakeAgent(workspace), access(target), new AbortController().signal)
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0]?.filename, target)
+    assert.match(await readFile(target, 'utf8'), /sid/u)
+  })
+})
+
 test('a fenced direct save falls back to a staged workspace copy', async () => {
   await withDirs(async (workspace, store) => {
     const calls: RecordedCall[] = []

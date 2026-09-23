@@ -26,8 +26,16 @@ fi
 echo "==> building workspace packages"
 (cd "$ROOT" && pnpm install && pnpm run build)
 
-echo "==> initializing profile '${PROFILE}' from the web template (no-op if it exists)"
-"${DSH[@]}" --profile "$PROFILE" --from-default-profile web --dump-config >/dev/null
+# Only a missing profile is initialized: `--from-default-profile` refuses a
+# shipped template name (`web`, `acp`, `headless`, …) even when that profile
+# already exists on disk, so running it unconditionally broke `./install.sh web`.
+PROFILE_DIR="${DSH_HOME:-$HOME/.dsh}/profiles/${PROFILE}"
+if [[ -f "$PROFILE_DIR/package.json" ]]; then
+  echo "==> profile '${PROFILE}' already exists; leaving it untouched"
+else
+  echo "==> initializing profile '${PROFILE}' from the web template"
+  "${DSH[@]}" --profile "$PROFILE" --from-default-profile web --dump-config >/dev/null
+fi
 
 echo "==> installing plugins into profile '${PROFILE}'"
 echo "    (the 'declares no dsh.bundle' warnings are expected for the three plain"
