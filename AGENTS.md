@@ -52,8 +52,8 @@ doc/dsh-test-account-plugin-design.md          # 原始设计方案（只读参�
   本插件已经装进该 profile，但 `dsh.profile.bundles` 只在启动时合成，改完要重启 GUI 才生效。
 - 开发与验证一律用独立 profile（或独立 `DSH_HOME`）；**不要**在没被要求时重启别人正在用的 profile / GUI 进程。
 - 启动任意 profile 用 `dsh --profile <name> --port <port>`（0.1.5 的 `web` 子命令写死 `--profile web`、
-  不接受 `--profile`；`dsh --profile <name> web` 是 0.1.7 才有的语法）。`install.sh` 默认优先用 PATH 上的
-  `dsh`，取不到才 `npx -y @deepseek-ai/dsh@0.1.5-rc.3`。
+  不接受 `--profile`；`dsh --profile <name> web` 是 0.1.7 才有的语法）。没有 `dsh` 时把它换成
+  `npx -y @deepseek-ai/dsh@0.1.5-rc.3`。
 
 ## 关键技术约束（改代码前先读）
 
@@ -114,11 +114,25 @@ pnpm run verify        # 全量：typecheck + build + test + bundle 结构检查
 
 分发只保留两条路线（README 已按此精简），**同一个 profile 只走一条**：
 
-- **路线 A（开发机、有源码）**：`./install.sh [profile]` 是唯一推荐安装入口；默认 profile 为
-  `test-account`，从 DSH 自带 `web` 模板初始化。脚本优先用 PATH 上的 `dsh`（取不到才 npx 拉
-  `0.1.5-rc.3`），并在装包前移除 profile 里残留的 0.1.7 browser-use 栈
-  （`@deepseek-ai/dsh-browser-use` / `@deepseek-ai/dsh-experimental-browser-use-runtime` / 旧 provider）
-  与改名前的 `@dsh-test-account/*` 两个包。
+- **路线 A（开发机、有源码）**：三条命令，默认 profile 为 `test-account`，从 DSH 自带 `web` 模板初始化。
+  仓库**不提供** `install.sh`：它只是这几条命令的包装，去掉后两条路线才对称。
+
+  ```bash
+  pnpm install && pnpm run build
+  test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
+  dsh --profile test-account --from-default-profile web --dump-config >/dev/null
+  dsh plugin --profile test-account add ./packages/test-account ./packages/playwright-mcp-storage
+  ```
+
+  第 1 条不能省：`dsh plugin add <本地目录>` 在 profile 里写的是 `link:`（`node_modules` 直接软链回
+  仓库），运行时读的 `lib/` 是 gitignore 的构建产物；`link:` 不触发 `build` / `prepack`，所以漏掉 build
+  会"装成功但没面板"。第 2 条也不能省：profile 不存在时 `dsh plugin` 会自己建一个，但用的是
+  `DEFAULT_PROFILE_BUNDLES = ["@deepseek-ai/dsh-base"]`，没有 `@deepseek-ai/dsh-web-app` 就没有
+  webserver / connection / 右侧栏 slot；而 `--from-default-profile` 对已存在的 profile 会拒绝，所以先判断。
+  `dsh plugin` 把相对路径锚到当前目录，因此在仓库根执行；没有 `dsh` 就换成
+  `npx -y @deepseek-ai/dsh@0.1.5-rc.3`。`link:` 是活挂，改完源码 `pnpm run build` + 重启该 profile 即生效，
+  不必重跑第 3 条。0.1.1 之前装过 0.1.7 browser-use 栈或 `@dsh-test-account/*` 旧 scope 的 profile 需手工
+  `dsh plugin --profile <p> remove` 清掉（根 README §1.6）。
 - **路线 B（没有源码的机器）**：从公共 npm（`https://registry.npmjs.org`）装 `@songxiyuan/*`，**匿名可装、
   不需要 token 或 `.npmrc` 映射**。scope 是 npm 侧的事实：只有 npm 用户 `songxiyuan` 能发这两个名字，
   与仓库 owner 同名只是巧合。安装/升级都是普通 registry 名字：

@@ -15,11 +15,15 @@ Playwright MCP 工具（由 `@songxiyuan/playwright-mcp-storage` 按 Session 挂
 本包不是独立安装的：它是 `dsh.bundle.patch` 的载体，必须和 storage provider 一起装进同一个
 DSH profile，否则面板、路由和浏览器工具都不完整。
 
-有源码的开发机，用仓库根的 `install.sh` 一次装好：
+有源码的开发机，在仓库根按根 README §1.2 装（先 build，再用本地路径 `dsh plugin add`）：
 
 ```bash
-./install.sh test-account        # 默认 profile；详见根 README「一、安装」
+pnpm install && pnpm run build
+dsh plugin --profile test-account add ./packages/test-account ./packages/playwright-mcp-storage
 ```
+
+本地装的是 `link:`，运行时直读仓库里的 `lib/`；profile 不存在时还要先按 `web` 模板初始化，
+完整的三条命令见根 README §1.2。
 
 没有源码的机器，从公共 npm 装（公开包，不需要 token / `.npmrc`）：
 

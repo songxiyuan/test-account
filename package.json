@@ -12,7 +12,6 @@
     "verify": "pnpm run typecheck && pnpm run build && pnpm run test && node scripts/check-bundle.mjs packages/test-account && node scripts/check-pack.mjs",
     "check:pack": "node scripts/check-pack.mjs",
     "publish:npm": "pnpm run verify && pnpm -r --filter \"./packages/*\" publish --no-git-checks --registry https://registry.npmjs.org",
-    "install:profile": "bash ./install.sh",
     "smoke:ui": "node scripts/smoke-ui.mjs"
   },
   "devDependencies": {

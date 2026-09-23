@@ -25,7 +25,7 @@ mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
 
 | 机器 | 路线 |
 | --- | --- |
-| 有本仓库 checkout | **A** 本地源码：[`./install.sh <profile>`](#12-路线-a本地源码) |
+| 有本仓库 checkout | **A** 本地源码：[三条命令](#12-路线-a本地源码) |
 | 只有 DSH、没有源码 | **B** 公共 npm：[`dsh plugin … add @songxiyuan/…`](#13-路线-b公共-npm) |
 
 > **给 AI Agent**：以下步骤自包含，命令都在**仓库根目录**执行；逐条检查退出码，非 0 就停下查
@@ -45,18 +45,34 @@ mcp__playwright-mcp__browser_storage_state / browser_set_storage_state
 ### 1.2 路线 A：本地源码
 
 ```bash
-./install.sh                  # 默认 profile test-account；不存在则用 DSH 自带 web 模板初始化
-./install.sh web              # 装进已有 profile（示例）
-DSH_BIN=dsh ./install.sh web  # 指定 dsh 命令；默认优先用 PATH 上的 dsh，取不到才 npx 拉 0.1.5-rc.3
+# 1) 构建：本地装进 profile 的是 link:，运行时直读仓库里的 lib/，而 lib/ 是构建产物（已 gitignore）
+pnpm install && pnpm run build
+
+# 2) profile 不存在时先按 web 模板初始化 —— 别跳过：
+#    `dsh plugin` 自己建的 profile 只带 @deepseek-ai/dsh-base，没有 web app，也就没有面板；
+#    已存在的 profile 不能再用 --from-default-profile（会报 already exists），所以先判断再初始化
+test -f "${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json" ||
+dsh --profile test-account --from-default-profile web --dump-config >/dev/null
+
+# 3) 装进目标 profile（两个包都要显式给出：cordis.patch.yml 按包名解析 provider）
+dsh plugin --profile test-account add ./packages/test-account ./packages/playwright-mcp-storage
 ```
 
-脚本依次做四件事：① 仓库内 `pnpm install && pnpm run build`；② **仅当目标 profile 不存在时**用 `web`
-模板初始化（已存在则原样保留）；③ `dsh plugin add` 两个本地包（会先移除 profile 里残留的 0.1.7
-browser-use 栈与 `@dsh-test-account/*` 旧 scope）；④ 靠 `dsh.bundle.patch` 自动把插件写进
-`dsh.profile.bundles`。
+三条命令都在**仓库根目录**执行（`dsh plugin` 会把相对路径锚到当前目录）、都幂等，可重复跑。没有 `dsh`
+时把命令里的 `dsh` 换成 `npx -y @deepseek-ai/dsh@0.1.5-rc.3`。
 
-> 初始化必须先判断目录是否存在：`--from-default-profile` 对 `web` / `acp` / `headless` / `sdk` 这类内置
-> 模板名，连已存在的 profile 也会拒绝。
+装进去的是 `link:`（profile 的 `node_modules` 软链回仓库），所以改完源码只要 `pnpm run build` +
+重启该 profile 就生效，**不必重跑第 3 条**。0.1.1 之前装过 0.1.7 browser-use 栈或 `@dsh-test-account/*`
+旧 scope 的 profile，按 §1.6 的对应行手工清掉。
+
+> **第 1 条不能省**：`dsh plugin add <本地目录>` 只建一个 `link:`，不会替你 `build`（`prepack` 只在
+> `npm pack` / `publish` 时跑，那是路线 B 的 tarball 才有的）。漏掉就是"装成功但没面板"。
+>
+> **第 2 条不能省**：profile 不存在时 `dsh plugin` 会自己建，但用的是 `DEFAULT_PROFILE_BUNDLES =
+> ["@deepseek-ai/dsh-base"]`——没有 `@deepseek-ai/dsh-web-app` 就没有 webserver / connection /
+> 右侧栏 slot，`/api` 也不存在。而 `--from-default-profile` 对已存在的 profile 一律拒绝，对 `web` /
+> `acp` / `headless` / `sdk` 这类内置模板名更是只看名字就拒绝（`./… web` 会报 `is shipped`），
+> 所以必须先判断再初始化。
 
 ### 1.3 路线 B：公共 npm
 
@@ -143,8 +159,9 @@ dsh --profile test-account --port 3081
 | 症状 | 处理 |
 | --- | --- |
 | `pnpm: command not found` | `corepack enable && corepack prepare pnpm@11.9.0 --activate` |
-| `npm error ENOENT ... _npx/<hash>/package.json` | npx 缓存损坏：`rm -rf ~/.npm/_npx` 后重跑，或 `DSH_BIN=dsh ./install.sh test-account` |
-| `profile "web" is shipped and cannot be a custom profile target` | 对**已存在**的 profile 跑了 `--from-default-profile`；删掉初始化那一步（`install.sh` 会自动判断） |
+| `npm error ENOENT ... _npx/<hash>/package.json` | npx 缓存损坏：`rm -rf ~/.npm/_npx` 后重跑，或改用 PATH 上的 `dsh`（§1.2 里 `dsh` 的替换反过来） |
+| `profile "web" is shipped and cannot be a custom profile target` | 对**已存在**或**叫内置模板名**的 profile 跑了 `--from-default-profile`；§1.2 第 2 条的 `test -f … \|\|` 就是为挡住它 |
+| profile 里残留 0.1.7 browser-use 栈或 `@dsh-test-account/*` 旧 scope | 0.1.1 之前的旧 profile 才会命中：先 `grep -E 'browser-use\|@dsh-test-account/' "${DSH_HOME:-$HOME/.dsh}/profiles/<p>/package.json"`，有输出再 `dsh plugin --profile <p> remove @deepseek-ai/dsh-browser-use @deepseek-ai/dsh-experimental-browser-use-runtime @songxiyuan/browser-use-playwright-mcp-storage @dsh-test-account/test-account @dsh-test-account/playwright-mcp-storage` |
 | `error: web takes none of parent --profile …` | 0.1.5 的 `web` 子命令写死 `--profile web`；改跑 `dsh --profile <name> --port 3081` |
 | `ERR_PNPM_FETCH_401` / `404 … npm.pkg.github.com` | profile 的 lockfile 还停在旧的 GitHub Packages 源；按 [§1.3](#13-路线-b公共-npm) 的迁移步骤强制重解析到公共 npm |
 | `ERR_PNPM_FETCH_401 … registry.npmjs.org` | 公共 npm 的公开包匿名可装；报 401 说明 `~/.npmrc` 里有失效的 `_authToken`/scope 映射，临时用 `npm_config_userconfig=/dev/null` 复跑定位 |
@@ -167,7 +184,11 @@ dsh_version: 0.1.5-rc.3
 cordis_version: 4.0.2
 pnpm_version: 11.9.0
 node_min: "22.18"
-local_entry: "./install.sh <profile>"
+local_source:
+  build: "pnpm install && pnpm run build"
+  init_profile: "test -f \"${DSH_HOME:-$HOME/.dsh}/profiles/test-account/package.json\" || dsh --profile test-account --from-default-profile web --dump-config >/dev/null"
+  add: "dsh plugin --profile test-account add ./packages/test-account ./packages/playwright-mcp-storage"
+  linked: true  # link: 安装：改完源码 rebuild + 重启即可，不必重装
 registry_entry:
   registry: "https://registry.npmjs.org"
   scope: "@songxiyuan"
@@ -291,7 +312,7 @@ pnpm run publish:npm   # 维护者发版：verify + 发布到公共 npm（regist
 真机冒烟（改动路由 / 工具执行 / provider 参数后跑，需要已有实例）：
 
 ```bash
-./install.sh test-account
+# 首次先按 §1.2 的三条命令装好 profile；之后改完源码只需 pnpm run build + 重启（link: 活挂）
 dsh --profile test-account --port 3081          # 记下打印的带 token URL
 
 pnpm run smoke:ui "http://127.0.0.1:3081/?token=..."                        # 只验面板
@@ -380,7 +401,7 @@ git tag v0.1.1 && git push origin v0.1.1   # 或 Actions → publish → Run wor
 - `prepack` 负责构建；`files` 只写目录，绝不列具体文件名（否则发布包缺兄弟模块）。
 - `publishConfig` 只留 `access: public`：**不要**再写 `registry`，否则又会发到别的源。
 - 改 scope 要一起改：两个 `package.json`、`cordis.patch.yml`、`client/index.tsx` 的 `PANEL_ID`、
-  `scripts/build-client.mjs` 写入的 bundle id（= 包名，必须重新 `build`）、文档与 `install.sh`。
+  `scripts/build-client.mjs` 写入的 bundle id（= 包名，必须重新 `build`）与文档。
 - 版本号一旦发布就永久占位，撤回要 `npm unpublish` 后发更高的号（已发布版本 24h 后不可 unpublish）。
 
 ## 参考

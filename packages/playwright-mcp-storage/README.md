@@ -28,12 +28,15 @@
 
 ## 安装
 
-不要单独装本包：它必须和 `@songxiyuan/test-account` 一起进同一个 profile。有源码的开发机用仓库根的
-`install.sh`：
+不要单独装本包：它必须和 `@songxiyuan/test-account` 一起进同一个 profile。有源码的开发机在仓库根按
+根 README §1.2 装：
 
 ```bash
-./install.sh test-account        # 默认 profile；详见根 README「一、安装」
+pnpm install && pnpm run build
+dsh plugin --profile test-account add ./packages/test-account ./packages/playwright-mcp-storage
 ```
+
+本地装的是 `link:`，`lib/` 必须先 build 出来（完整命令见根 README §1.2）。
 
 没有源码的机器从公共 npm 装（`@playwright/mcp` 也在公共 npm 上，传递依赖自动解析；不需要 token）：
 
